@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -7,6 +9,9 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from app.core.config import get_settings
 from app.services.exceptions import LLMProviderConfigurationError, LLMProviderInvocationError
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
+
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMAnalysisResult:
@@ -92,25 +97,57 @@ class OpenAILLMProvider:
         self, prompt: PromptSet, *, diff_text: str, title: str
     ) -> LLMAnalysisResult:
         del diff_text, title
-        response_text = self._generate_text(prompt)
-        payload = self._parse_json_object(response_text)
-        return LLMAnalysisResult(
-            summary=self._require_text_field(payload, "summary"),
-            risks=self._require_text_field(payload, "risks"),
-            suggested_tests=self._require_text_field(payload, "suggested_tests"),
+        started_at = time.perf_counter()
+        try:
+            response_text = self._generate_text(prompt)
+            payload = self._parse_json_object(response_text)
+            result = LLMAnalysisResult(
+                summary=self._require_text_field(payload, "summary"),
+                risks=self._require_text_field(payload, "risks"),
+                suggested_tests=self._require_text_field(payload, "suggested_tests"),
+            )
+        except LLMProviderInvocationError:
+            logger.warning(
+                "OpenAI pull request analysis failed model=%s elapsed_ms=%d",
+                self.model,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
+
+        logger.info(
+            "OpenAI pull request analysis completed model=%s elapsed_ms=%d",
+            self.model,
+            int((time.perf_counter() - started_at) * 1000),
         )
+        return result
 
     def triage_flaky_test(
         self, prompt: PromptSet, *, test_name: str, failure_log: str
     ) -> FlakyTriageResult:
         del test_name, failure_log
-        response_text = self._generate_text(prompt)
-        payload = self._parse_json_object(response_text)
-        return FlakyTriageResult(
-            cluster_key=self._require_text_field(payload, "cluster_key"),
-            suspected_root_cause=self._require_text_field(payload, "suspected_root_cause"),
-            suggested_fix=self._require_text_field(payload, "suggested_fix"),
+        started_at = time.perf_counter()
+        try:
+            response_text = self._generate_text(prompt)
+            payload = self._parse_json_object(response_text)
+            result = FlakyTriageResult(
+                cluster_key=self._require_text_field(payload, "cluster_key"),
+                suspected_root_cause=self._require_text_field(payload, "suspected_root_cause"),
+                suggested_fix=self._require_text_field(payload, "suggested_fix"),
+            )
+        except LLMProviderInvocationError:
+            logger.warning(
+                "OpenAI flaky triage failed model=%s elapsed_ms=%d",
+                self.model,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
+
+        logger.info(
+            "OpenAI flaky triage completed model=%s elapsed_ms=%d",
+            self.model,
+            int((time.perf_counter() - started_at) * 1000),
         )
+        return result
 
     def _generate_text(self, prompt: PromptSet) -> str:
         try:
@@ -167,10 +204,12 @@ class LLMClient:
         return self.provider.provider_name
 
     def analyze_pull_request(self, diff_text: str, title: str) -> LLMAnalysisResult:
+        logger.info("LLM analyze_pull_request provider=%s", self.provider_name)
         prompt = self.prompt_builder.build_pull_request_analysis_prompt(diff_text, title)
         return self.provider.analyze_pull_request(prompt, diff_text=diff_text, title=title)
 
     def triage_flaky_test(self, test_name: str, failure_log: str) -> FlakyTriageResult:
+        logger.info("LLM triage_flaky_test provider=%s", self.provider_name)
         prompt = self.prompt_builder.build_flaky_test_triage_prompt(test_name, failure_log)
         return self.provider.triage_flaky_test(
             prompt,

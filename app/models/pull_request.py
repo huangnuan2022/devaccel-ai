@@ -18,6 +18,7 @@ class PullRequestRecord(Base):
     author: Mapped[str] = mapped_column(String(120))
     diff_text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default="queued")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

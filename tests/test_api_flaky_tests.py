@@ -23,6 +23,7 @@ def test_create_flaky_test_triage_enqueues_job(client: TestClient, db_session: S
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
+    assert body["error_message"] is None
     assert body["cluster_key"] == "pending"
     assert body["suspected_root_cause"] == ""
     assert body["suggested_fix"] == ""
@@ -59,11 +60,37 @@ def test_get_flaky_test_triage_returns_completed_result(
         "suite_name": "payments.integration",
         "branch_name": "main",
         "status": "completed",
+        "error_message": None,
         "cluster_key": "cluster:test_retry_payment_timeout",
         "suspected_root_cause": "Intermittent timeout while waiting for retry completion",
         "suggested_fix": "Stabilize async wait and add retry instrumentation",
         "created_at": response.json()["created_at"],
     }
+
+
+def test_get_flaky_test_triage_returns_failed_error_message(
+    client: TestClient, db_session: Session
+) -> None:
+    run = FlakyTestRun(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+        status="failed",
+        error_message="OpenAI response was not valid JSON",
+        cluster_key="pending",
+        suspected_root_cause="",
+        suggested_fix="",
+    )
+    db_session.add(run)
+    db_session.commit()
+    db_session.refresh(run)
+
+    response = client.get(f"/api/v1/flaky-tests/{run.id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_message"] == "OpenAI response was not valid JSON"
 
 
 def test_get_flaky_test_triage_returns_404_when_missing(client: TestClient) -> None:

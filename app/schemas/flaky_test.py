@@ -16,6 +16,7 @@ class FlakyTestTriageResponse(BaseModel):
     suite_name: str
     branch_name: str
     status: str
+    error_message: str | None = None
     cluster_key: str
     suspected_root_cause: str
     suggested_fix: str

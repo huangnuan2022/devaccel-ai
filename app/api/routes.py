@@ -120,6 +120,7 @@ def create_pull_request_analysis(
         title=record.title,
         author=record.author,
         status=record.status,
+        error_message=record.error_message,
         created_at=record.created_at,
     )
 
@@ -141,6 +142,7 @@ def get_pull_request_analysis(
         title=record.title,
         author=record.author,
         status=record.status,
+        error_message=record.error_message,
         summary=latest.summary if latest else None,
         risks=latest.risks if latest else None,
         suggested_tests=latest.suggested_tests if latest else None,

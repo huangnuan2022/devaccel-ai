@@ -24,6 +24,7 @@ def test_create_pull_request_analysis_enqueues_job(client: TestClient, db_sessio
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
+    assert body["error_message"] is None
     assert body["summary"] is None
     assert body["risks"] is None
     assert body["suggested_tests"] is None
@@ -70,11 +71,36 @@ def test_get_pull_request_analysis_returns_latest_analysis(
         "title": "Refactor payment retry flow",
         "author": "alice",
         "status": "completed",
+        "error_message": None,
         "summary": "PR analysis summary",
         "risks": "PR analysis risks",
         "suggested_tests": "PR analysis suggested tests",
         "created_at": response.json()["created_at"],
     }
+
+
+def test_get_pull_request_analysis_returns_failed_error_message(
+    client: TestClient, db_session: Session
+) -> None:
+    record = PullRequestRecord(
+        repo_full_name="acme/payments",
+        pr_number=42,
+        title="Refactor payment retry flow",
+        author="alice",
+        diff_text="+++ services/payment.py\n+ retry_count += 1",
+        status="failed",
+        error_message="OpenAI request failed: timeout",
+    )
+    db_session.add(record)
+    db_session.commit()
+    db_session.refresh(record)
+
+    response = client.get(f"/api/v1/pull-requests/{record.id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_message"] == "OpenAI request failed: timeout"
+    assert response.json()["summary"] is None
 
 
 def test_get_pull_request_analysis_returns_404_when_missing(client: TestClient) -> None:

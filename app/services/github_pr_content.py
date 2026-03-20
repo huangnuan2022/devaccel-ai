@@ -1,8 +1,13 @@
+import logging
+
 import httpx
 
 from app.core.config import get_settings
 from app.services.exceptions import GitHubPullRequestContentError
 from app.services.github_app_auth import GitHubAppAuthService
+
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubPullRequestContentService:
@@ -24,6 +29,14 @@ class GitHubPullRequestContentService:
         owner, repo = self._parse_repo_full_name(repo_full_name)
         files: list[dict] = []
         page = 1
+        auth_mode = "installation" if installation_id is not None else "token" if self.settings.github_token else "anonymous"
+
+        logger.info(
+            "Fetching GitHub pull request patch bundle repo=%s pr_number=%s auth_mode=%s",
+            repo_full_name,
+            pr_number,
+            auth_mode,
+        )
 
         while True:
             response = self.client.get(
@@ -32,6 +45,13 @@ class GitHubPullRequestContentService:
                 params={"per_page": 100, "page": page},
             )
             if response.status_code >= 400:
+                logger.warning(
+                    "GitHub pull request files request failed repo=%s pr_number=%s page=%s status_code=%s",
+                    repo_full_name,
+                    pr_number,
+                    page,
+                    response.status_code,
+                )
                 raise GitHubPullRequestContentError(
                     f"Failed to fetch pull request files for {repo_full_name}#{pr_number}: "
                     f"HTTP {response.status_code}"
@@ -73,6 +93,13 @@ class GitHubPullRequestContentService:
                 f"Pull request {repo_full_name}#{pr_number} did not contain textual patch data"
             )
 
+        logger.info(
+            "Fetched GitHub pull request patch bundle repo=%s pr_number=%s files=%s patch_sections=%s",
+            repo_full_name,
+            pr_number,
+            len(files),
+            len(sections) // 3,
+        )
         return "\n".join(sections)
 
     def _build_headers(self, installation_id: int | None) -> dict[str, str]:

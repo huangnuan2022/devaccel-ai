@@ -15,6 +15,7 @@ class FlakyTestRun(Base):
     branch_name: Mapped[str] = mapped_column(String(255))
     failure_log: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default="queued")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cluster_key: Mapped[str] = mapped_column(String(255), default="pending")
     suspected_root_cause: Mapped[str] = mapped_column(Text, default="")
     suggested_fix: Mapped[str] = mapped_column(Text, default="")

@@ -21,7 +21,7 @@ class PullRequestAnalysisWorkflowService:
         try:
             self.dispatcher.dispatch_pull_request_analysis(record.id)
         except Exception as exc:
-            self.pr_service.mark_dispatch_failed(record.id)
+            self.pr_service.mark_dispatch_failed(record.id, str(exc))
             raise TaskDispatchError(
                 f"Failed to dispatch pull request analysis for record {record.id}"
             ) from exc
@@ -70,6 +70,6 @@ class FlakyTestWorkflowService:
         try:
             self.dispatcher.dispatch_flaky_test_triage(run.id)
         except Exception as exc:
-            self.flaky_test_service.mark_dispatch_failed(run.id)
+            self.flaky_test_service.mark_dispatch_failed(run.id, str(exc))
             raise TaskDispatchError(f"Failed to dispatch flaky test triage for run {run.id}") from exc
         return run

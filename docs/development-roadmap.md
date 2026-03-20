@@ -41,6 +41,8 @@ Current note:
 
 - Prompt construction and provider selection are now separated from domain services.
 - OpenAI is now wired as the first real provider path behind the shared `LLMClient`.
+- Background jobs now persist `failed` state plus `error_message` when provider calls fail.
+- Minimal provider/content-fetch observability is now in place with provider/model/timing and job-state logs.
 - Bedrock remains a follow-up provider on the same abstraction.
 
 ## Phase 4: Data and Reliability

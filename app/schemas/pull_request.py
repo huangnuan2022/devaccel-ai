@@ -19,6 +19,7 @@ class PullRequestAnalysisResponse(BaseModel):
     title: str
     author: str
     status: str
+    error_message: str | None = None
     summary: str | None = None
     risks: str | None = None
     suggested_tests: str | None = None

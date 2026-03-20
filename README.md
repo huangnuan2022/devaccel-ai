@@ -210,11 +210,13 @@ Implemented in the current MVP:
 - Delivery-id deduplication for GitHub webhook ingestion
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
 - Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option
+- Background jobs now persist failure status and error_message when provider/content retrieval fails
+- Provider/model/timing logs now cover LLM invocations plus key GitHub patch-fetch workflow steps
 - Automated tests across API, service, and task layers using a dedicated PostgreSQL test database
 
 Planned next steps:
 
 - Harden installation-token refresh, observability, and failure handling for GitHub App access
-- Add end-to-end validation and richer failure handling for the new OpenAI provider path
+- Add end-to-end validation and richer observability for the new OpenAI provider path
 - Implement the Bedrock provider behind the same prompt/provider abstraction
 - Expand observability, retry handling, and deployment automation

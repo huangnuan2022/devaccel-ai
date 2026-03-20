@@ -190,8 +190,70 @@ def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
 
         stored = db_session.query(FlakyTestRun).filter_by(id=run.id).one()
         assert stored.suggested_fix != ""
+        assert stored.error_message is None
     finally:
         pass
+
+
+def test_pr_service_marks_record_failed_when_llm_invocation_fails(db_session: Session) -> None:
+    class FailingLLMClient:
+        provider_name = "openai"
+
+        def analyze_pull_request(self, diff_text: str, title: str) -> LLMAnalysisResult:
+            raise LLMProviderInvocationError("OpenAI request failed: timeout")
+
+    service = PullRequestService(db_session, llm_client=FailingLLMClient())  # type: ignore[arg-type]
+    payload = PullRequestAnalyzeRequest(
+        repo_full_name="acme/payments",
+        pr_number=42,
+        title="Refactor payment retry flow",
+        author="alice",
+        diff_text="+++ services/payment.py\n+ retry_count += 1",
+    )
+
+    record = service.create_analysis_job(payload)
+
+    try:
+        service.process_analysis(record.id)
+    except LLMProviderInvocationError as exc:
+        assert "timeout" in str(exc)
+    else:
+        raise AssertionError("Expected LLMProviderInvocationError from failing LLM client")
+
+    failed = db_session.get(PullRequestRecord, record.id)
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.error_message == "OpenAI request failed: timeout"
+
+
+def test_flaky_service_marks_run_failed_when_llm_invocation_fails(db_session: Session) -> None:
+    class FailingLLMClient:
+        provider_name = "openai"
+
+        def triage_flaky_test(self, test_name: str, failure_log: str) -> object:
+            raise LLMProviderInvocationError("OpenAI response was not valid JSON")
+
+    service = FlakyTestService(db_session, llm_client=FailingLLMClient())  # type: ignore[arg-type]
+    payload = FlakyTestTriageRequest(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+    )
+
+    run = service.create_triage_job(payload)
+
+    try:
+        service.process_triage(run.id)
+    except LLMProviderInvocationError as exc:
+        assert "valid JSON" in str(exc)
+    else:
+        raise AssertionError("Expected LLMProviderInvocationError from failing flaky LLM client")
+
+    failed = db_session.get(FlakyTestRun, run.id)
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.error_message == "OpenAI response was not valid JSON"
 
 
 def test_github_pr_content_service_builds_patch_bundle_from_file_patches() -> None:
@@ -613,6 +675,7 @@ def test_pull_request_workflow_marks_dispatch_failed_when_dispatcher_raises(
 
         stored = db_session.query(PullRequestRecord).one()
         assert stored.status == "dispatch_failed"
+        assert stored.error_message == "broker unavailable"
     finally:
         pass
 
@@ -641,6 +704,7 @@ def test_flaky_test_workflow_marks_dispatch_failed_when_dispatcher_raises(
 
         stored = db_session.query(FlakyTestRun).one()
         assert stored.status == "dispatch_failed"
+        assert stored.error_message == "broker unavailable"
     finally:
         pass
 
