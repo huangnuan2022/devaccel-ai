@@ -1,0 +1,1 @@
+"""DevAccel-AI application package."""

@@ -1,0 +1,80 @@
+import httpx
+
+from app.core.config import get_settings
+from app.services.exceptions import GitHubPullRequestContentError
+
+
+class GitHubPullRequestContentService:
+    def __init__(self, client: httpx.Client | None = None) -> None:
+        self.settings = get_settings()
+        self.client = client or httpx.Client(timeout=20.0)
+
+    def fetch_pull_request_patch_bundle(self, repo_full_name: str, pr_number: int) -> str:
+        owner, repo = self._parse_repo_full_name(repo_full_name)
+        files: list[dict] = []
+        page = 1
+
+        while True:
+            response = self.client.get(
+                f"{self.settings.github_api_url}/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                headers=self._build_headers(),
+                params={"per_page": 100, "page": page},
+            )
+            if response.status_code >= 400:
+                raise GitHubPullRequestContentError(
+                    f"Failed to fetch pull request files for {repo_full_name}#{pr_number}: "
+                    f"HTTP {response.status_code}"
+                )
+
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise GitHubPullRequestContentError(
+                    f"Unexpected GitHub response while fetching pull request files for "
+                    f"{repo_full_name}#{pr_number}"
+                )
+
+            if not payload:
+                break
+
+            files.extend(payload)
+            if len(payload) < 100:
+                break
+            page += 1
+
+        if not files:
+            raise GitHubPullRequestContentError(
+                f"No pull request files returned for {repo_full_name}#{pr_number}"
+            )
+
+        sections: list[str] = []
+        for file_info in files:
+            filename = file_info.get("filename", "unknown")
+            status = file_info.get("status", "modified")
+            patch = file_info.get("patch")
+            if not isinstance(patch, str) or not patch.strip():
+                continue
+            sections.append(f"diff --git a/{filename} b/{filename}")
+            sections.append(f"# file_status: {status}")
+            sections.append(patch)
+
+        if not sections:
+            raise GitHubPullRequestContentError(
+                f"Pull request {repo_full_name}#{pr_number} did not contain textual patch data"
+            )
+
+        return "\n".join(sections)
+
+    def _build_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": self.settings.github_api_version,
+        }
+        if self.settings.github_token:
+            headers["Authorization"] = f"Bearer {self.settings.github_token}"
+        return headers
+
+    def _parse_repo_full_name(self, repo_full_name: str) -> tuple[str, str]:
+        parts = repo_full_name.split("/", maxsplit=1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise GitHubPullRequestContentError(f"Invalid repo_full_name: {repo_full_name}")
+        return parts[0], parts[1]
