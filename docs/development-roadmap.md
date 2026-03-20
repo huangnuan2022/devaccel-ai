@@ -37,6 +37,11 @@ Goals:
 3. Centralize prompt construction and provider configuration
 4. Add model/provider observability and failure handling
 
+Current note:
+
+- Prompt construction and provider selection are now being separated from domain services.
+- The repository still runs with `llm_provider=mock` until OpenAI / Bedrock implementations are wired.
+
 ## Phase 4: Data and Reliability
 
 Goals:

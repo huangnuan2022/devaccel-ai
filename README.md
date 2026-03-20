@@ -73,6 +73,8 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ".[dev]"
 ```
 
+The current default is `LLM_PROVIDER=mock`, which keeps PR analysis and flaky triage deterministic while the real OpenAI / Bedrock integrations are prepared behind a provider boundary.
+
 ### 2. Start local dependencies
 
 ```bash
@@ -186,6 +188,6 @@ Implemented in the current MVP:
 Planned next steps:
 
 - Harden installation-token refresh, observability, and failure handling for GitHub App access
-- Replace mock LLM responses with real OpenAI / Bedrock integrations
+- Replace mock LLM responses with real OpenAI / Bedrock provider implementations behind the new prompt/provider abstraction
 - Move test database setup closer to the runtime migration path
 - Expand observability, retry handling, and deployment automation

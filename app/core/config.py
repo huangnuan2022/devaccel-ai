@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./devaccel.db"
     redis_url: str = "redis://localhost:6379/0"
 
+    llm_provider: str = "mock"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"

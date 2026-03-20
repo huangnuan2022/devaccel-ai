@@ -10,11 +10,17 @@ from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
-from app.services.exceptions import InvalidWebhookPayloadError, TaskDispatchError
+from app.services.exceptions import (
+    InvalidWebhookPayloadError,
+    LLMProviderConfigurationError,
+    TaskDispatchError,
+)
 from app.services.flaky_triage import FlakyTestService
 from app.services.github_app_auth import GitHubAppAuthService
 from app.services.github import GitHubWebhookService
 from app.services.github_pr_content import GitHubPullRequestContentService
+from app.services.llm import LLMAnalysisResult, LLMClient
+from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
 from app.services.workflows import (
     FlakyTestWorkflowService,
@@ -146,6 +152,37 @@ def test_pr_service_get_analysis_loads_related_analyses() -> None:
         db.close()
 
 
+def test_pr_service_persists_provider_name_from_llm_client() -> None:
+    class FakeLLMClient:
+        provider_name = "fake-provider"
+
+        def analyze_pull_request(self, diff_text: str, title: str) -> LLMAnalysisResult:
+            return LLMAnalysisResult(
+                summary=f"summary for {title}",
+                risks=f"risks for {len(diff_text.splitlines())} lines",
+                suggested_tests="1. smoke\n2. regression",
+            )
+
+    db = make_test_db()
+    try:
+        service = PullRequestService(db, llm_client=FakeLLMClient())  # type: ignore[arg-type]
+        payload = PullRequestAnalyzeRequest(
+            repo_full_name="acme/payments",
+            pr_number=42,
+            title="Refactor payment retry flow",
+            author="alice",
+            diff_text="+++ services/payment.py\n+ retry_count += 1",
+        )
+
+        record = service.create_analysis_job(payload)
+        service.process_analysis(record.id)
+
+        analysis = db.query(PullRequestAnalysis).filter_by(pull_request_id=record.id).one()
+        assert analysis.model_provider == "fake-provider"
+    finally:
+        db.close()
+
+
 def test_flaky_service_create_and_process_triage() -> None:
     # 这同样是“service 层业务测试”。
     # 最合适出现的阶段：
@@ -261,6 +298,59 @@ def test_github_pr_content_service_uses_installation_token_when_installation_id_
     assert client.last_headers is not None
     assert client.last_headers["Authorization"] == "Bearer installation-token"
     auth_service.get_installation_access_token.assert_called_once_with(999)
+
+
+def test_llm_client_uses_prompt_builder_and_provider() -> None:
+    class FakePromptBuilder(LLMPromptBuilder):
+        def build_pull_request_analysis_prompt(self, diff_text: str, title: str) -> PromptSet:
+            return PromptSet(
+                system_prompt="system prompt",
+                user_prompt=f"title={title}; diff_lines={len(diff_text.splitlines())}",
+            )
+
+    class FakeProvider:
+        provider_name = "fake-provider"
+
+        def __init__(self) -> None:
+            self.last_prompt: PromptSet | None = None
+
+        def analyze_pull_request(
+            self, prompt: PromptSet, *, diff_text: str, title: str
+        ) -> LLMAnalysisResult:
+            self.last_prompt = prompt
+            return LLMAnalysisResult(
+                summary=f"provider summary for {title}",
+                risks=f"provider risks for {len(diff_text.splitlines())} lines",
+                suggested_tests="1. provider test",
+            )
+
+        def triage_flaky_test(
+            self, prompt: PromptSet, *, test_name: str, failure_log: str
+        ) -> object:
+            raise AssertionError("This test should not call triage_flaky_test")
+
+    provider = FakeProvider()
+    client = LLMClient(provider=provider, prompt_builder=FakePromptBuilder())
+
+    result = client.analyze_pull_request(
+        "+++ services/payment.py\n+ retry_count += 1",
+        "Refactor payment retry flow",
+    )
+
+    assert provider.last_prompt is not None
+    assert provider.last_prompt.system_prompt == "system prompt"
+    assert "title=Refactor payment retry flow" in provider.last_prompt.user_prompt
+    assert client.provider_name == "fake-provider"
+    assert result.summary == "provider summary for Refactor payment retry flow"
+
+
+def test_llm_client_rejects_provider_names_that_are_not_wired_yet() -> None:
+    try:
+        LLMClient(provider_name="openai")
+    except LLMProviderConfigurationError as exc:
+        assert "not wired yet" in str(exc)
+    else:
+        raise AssertionError("Expected LLMProviderConfigurationError for openai provider selection")
 
 
 def test_github_app_auth_service_returns_cached_token_before_expiry() -> None:

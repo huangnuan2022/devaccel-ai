@@ -12,3 +12,7 @@ class TaskDispatchError(Exception):
 
 class GitHubPullRequestContentError(Exception):
     pass
+
+
+class LLMProviderConfigurationError(Exception):
+    pass

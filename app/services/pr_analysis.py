@@ -70,7 +70,7 @@ class PullRequestService:
             summary=result.summary,
             risks=result.risks,
             suggested_tests=result.suggested_tests,
-            model_provider="mock",
+            model_provider=self.llm_client.provider_name,
         )
         record.status = "completed"
         self.db.add(analysis)
