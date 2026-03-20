@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     database_url: str = "sqlite:///./devaccel.db"
+    test_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
     llm_provider: str = "mock"

@@ -2,10 +2,8 @@ import hashlib
 import hmac
 from unittest.mock import Mock
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
@@ -29,37 +27,20 @@ from app.services.workflows import (
 )
 
 
-def make_test_db() -> Session:
-    # 这类测试属于“service 层单元 / 轻集成测试”。
-    # 在真实工程里，通常应该出现在：
-    # 1. model 和 service 层已经稳定
-    # 2. route 还没大规模铺开之前，或 route 同步推进时
-    #
-    # 它的价值是：
-    # 1. 先验证业务逻辑对不对
-    # 2. 不把 HTTP 框架细节混进来
-    # 3. 出问题时更容易定位在业务层
-    engine = create_engine("sqlite:///:memory:", future=True)
-    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
-    Base.metadata.create_all(bind=engine)
-    return TestingSessionLocal()
-
-
 def make_signature(service: GitHubWebhookService, raw_body: bytes) -> str:
     secret = service.settings.github_webhook_secret
     return "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
 
 
-def test_pr_service_create_and_process_analysis() -> None:
+def test_pr_service_create_and_process_analysis(db_session: Session) -> None:
     # 这是“service 层的核心业务测试”。
     # 最合适出现的阶段：
     # 1. 你已经有 model
     # 2. 你已经有 schema
     # 3. 你已经有 service
     # 4. 但 route / Celery 还可以晚一点再测
-    db = make_test_db()
     try:
-        service = PullRequestService(db)
+        service = PullRequestService(db_session)
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
             pr_number=42,
@@ -75,21 +56,22 @@ def test_pr_service_create_and_process_analysis() -> None:
         processed = service.process_analysis(record.id)
         assert processed.status == "completed"
 
-        analysis = db.query(PullRequestAnalysis).filter_by(pull_request_id=record.id).one()
+        analysis = db_session.query(PullRequestAnalysis).filter_by(pull_request_id=record.id).one()
         assert "PR 'Refactor payment retry flow'" in analysis.summary
         assert analysis.model_provider == "mock"
     finally:
-        db.close()
+        pass
 
 
-def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholder() -> None:
-    db = make_test_db()
+def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholder(
+    db_session: Session,
+) -> None:
     try:
         github_content_service = Mock()
         github_content_service.fetch_pull_request_patch_bundle.return_value = (
             "diff --git a/app.py b/app.py\n@@ -1 +1 @@\n-print('old')\n+print('new')"
         )
-        service = PullRequestService(db, github_content_service=github_content_service)
+        service = PullRequestService(db_session, github_content_service=github_content_service)
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
             pr_number=42,
@@ -103,7 +85,7 @@ def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholde
         processed = service.process_analysis(record.id)
 
         assert processed.status == "completed"
-        refreshed = db.get(PullRequestRecord, record.id)
+        refreshed = db_session.get(PullRequestRecord, record.id)
         assert refreshed is not None
         assert "diff --git a/app.py b/app.py" in refreshed.diff_text
         github_content_service.fetch_pull_request_patch_bundle.assert_called_once_with(
@@ -112,11 +94,10 @@ def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholde
             installation_id=98765,
         )
     finally:
-        db.close()
+        pass
 
 
-def test_pr_service_get_analysis_loads_related_analyses() -> None:
-    db = make_test_db()
+def test_pr_service_get_analysis_loads_related_analyses(db_session: Session) -> None:
     try:
         record = PullRequestRecord(
             repo_full_name="acme/payments",
@@ -126,11 +107,11 @@ def test_pr_service_get_analysis_loads_related_analyses() -> None:
             diff_text="+++ services/payment.py\n+ retry_count += 1",
             status="completed",
         )
-        db.add(record)
-        db.commit()
-        db.refresh(record)
+        db_session.add(record)
+        db_session.commit()
+        db_session.refresh(record)
 
-        db.add(
+        db_session.add(
             PullRequestAnalysis(
                 pull_request_id=record.id,
                 summary="PR analysis summary",
@@ -139,9 +120,9 @@ def test_pr_service_get_analysis_loads_related_analyses() -> None:
                 model_provider="mock",
             )
         )
-        db.commit()
+        db_session.commit()
 
-        service = PullRequestService(db)
+        service = PullRequestService(db_session)
         loaded = service.get_analysis(record.id)
 
         assert loaded is not None
@@ -149,10 +130,10 @@ def test_pr_service_get_analysis_loads_related_analyses() -> None:
         assert len(loaded.analyses) == 1
         assert loaded.analyses[0].summary == "PR analysis summary"
     finally:
-        db.close()
+        pass
 
 
-def test_pr_service_persists_provider_name_from_llm_client() -> None:
+def test_pr_service_persists_provider_name_from_llm_client(db_session: Session) -> None:
     class FakeLLMClient:
         provider_name = "fake-provider"
 
@@ -163,9 +144,8 @@ def test_pr_service_persists_provider_name_from_llm_client() -> None:
                 suggested_tests="1. smoke\n2. regression",
             )
 
-    db = make_test_db()
     try:
-        service = PullRequestService(db, llm_client=FakeLLMClient())  # type: ignore[arg-type]
+        service = PullRequestService(db_session, llm_client=FakeLLMClient())  # type: ignore[arg-type]
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
             pr_number=42,
@@ -177,21 +157,20 @@ def test_pr_service_persists_provider_name_from_llm_client() -> None:
         record = service.create_analysis_job(payload)
         service.process_analysis(record.id)
 
-        analysis = db.query(PullRequestAnalysis).filter_by(pull_request_id=record.id).one()
+        analysis = db_session.query(PullRequestAnalysis).filter_by(pull_request_id=record.id).one()
         assert analysis.model_provider == "fake-provider"
     finally:
-        db.close()
+        pass
 
 
-def test_flaky_service_create_and_process_triage() -> None:
+def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
     # 这同样是“service 层业务测试”。
     # 最合适出现的阶段：
     # 1. flaky 的 model / schema / service 已经搭好
     # 2. 想先确认 triage 核心流程正确
     # 3. 还没有把 HTTP / Celery 全部卷进来
-    db = make_test_db()
     try:
-        service = FlakyTestService(db)
+        service = FlakyTestService(db_session)
         payload = FlakyTestTriageRequest(
             test_name="test_retry_payment_timeout",
             suite_name="payments.integration",
@@ -208,10 +187,10 @@ def test_flaky_service_create_and_process_triage() -> None:
         assert processed.cluster_key == "cluster:test_retry_payment_timeout"
         assert "timeout" in processed.suspected_root_cause.lower()
 
-        stored = db.query(FlakyTestRun).filter_by(id=run.id).one()
+        stored = db_session.query(FlakyTestRun).filter_by(id=run.id).one()
         assert stored.suggested_fix != ""
     finally:
-        db.close()
+        pass
 
 
 def test_github_pr_content_service_builds_patch_bundle_from_file_patches() -> None:
@@ -461,10 +440,9 @@ def test_github_webhook_service_requires_installation_id() -> None:
         raise AssertionError("Expected InvalidWebhookPayloadError when installation is missing")
 
 
-def test_pull_request_workflow_enqueues_job_and_dispatches_task() -> None:
-    db = make_test_db()
+def test_pull_request_workflow_enqueues_job_and_dispatches_task(db_session: Session) -> None:
     try:
-        pr_service = PullRequestService(db)
+        pr_service = PullRequestService(db_session)
         dispatcher = Mock()
         workflow = PullRequestAnalysisWorkflowService(pr_service=pr_service, dispatcher=dispatcher)
         payload = PullRequestAnalyzeRequest(
@@ -482,13 +460,12 @@ def test_pull_request_workflow_enqueues_job_and_dispatches_task() -> None:
         assert record.status == "queued"
         dispatcher.dispatch_pull_request_analysis.assert_called_once_with(record.id)
     finally:
-        db.close()
+        pass
 
 
-def test_pull_request_workflow_handles_github_webhook_and_dispatches_task() -> None:
-    db = make_test_db()
+def test_pull_request_workflow_handles_github_webhook_and_dispatches_task(db_session: Session) -> None:
     try:
-        pr_service = PullRequestService(db)
+        pr_service = PullRequestService(db_session)
         dispatcher = Mock()
         webhook_service = GitHubWebhookService()
         raw_body = b"{}"
@@ -524,13 +501,12 @@ def test_pull_request_workflow_handles_github_webhook_and_dispatches_task() -> N
         assert record.delivery_id == "delivery-123"
         dispatcher.dispatch_pull_request_analysis.assert_called_once_with(record.id)
     finally:
-        db.close()
+        pass
 
 
-def test_flaky_test_workflow_enqueues_job_and_dispatches_task() -> None:
-    db = make_test_db()
+def test_flaky_test_workflow_enqueues_job_and_dispatches_task(db_session: Session) -> None:
     try:
-        flaky_service = FlakyTestService(db)
+        flaky_service = FlakyTestService(db_session)
         dispatcher = Mock()
         workflow = FlakyTestWorkflowService(flaky_test_service=flaky_service, dispatcher=dispatcher)
         payload = FlakyTestTriageRequest(
@@ -546,13 +522,14 @@ def test_flaky_test_workflow_enqueues_job_and_dispatches_task() -> None:
         assert run.status == "queued"
         dispatcher.dispatch_flaky_test_triage.assert_called_once_with(run.id)
     finally:
-        db.close()
+        pass
 
 
-def test_pull_request_workflow_marks_dispatch_failed_when_dispatcher_raises() -> None:
-    db = make_test_db()
+def test_pull_request_workflow_marks_dispatch_failed_when_dispatcher_raises(
+    db_session: Session,
+) -> None:
     try:
-        pr_service = PullRequestService(db)
+        pr_service = PullRequestService(db_session)
         dispatcher = Mock()
         dispatcher.dispatch_pull_request_analysis.side_effect = RuntimeError("broker unavailable")
         workflow = PullRequestAnalysisWorkflowService(pr_service=pr_service, dispatcher=dispatcher)
@@ -571,16 +548,17 @@ def test_pull_request_workflow_marks_dispatch_failed_when_dispatcher_raises() ->
         else:
             raise AssertionError("Expected TaskDispatchError when dispatcher fails")
 
-        stored = db.query(PullRequestRecord).one()
+        stored = db_session.query(PullRequestRecord).one()
         assert stored.status == "dispatch_failed"
     finally:
-        db.close()
+        pass
 
 
-def test_flaky_test_workflow_marks_dispatch_failed_when_dispatcher_raises() -> None:
-    db = make_test_db()
+def test_flaky_test_workflow_marks_dispatch_failed_when_dispatcher_raises(
+    db_session: Session,
+) -> None:
     try:
-        flaky_service = FlakyTestService(db)
+        flaky_service = FlakyTestService(db_session)
         dispatcher = Mock()
         dispatcher.dispatch_flaky_test_triage.side_effect = RuntimeError("broker unavailable")
         workflow = FlakyTestWorkflowService(flaky_test_service=flaky_service, dispatcher=dispatcher)
@@ -598,16 +576,17 @@ def test_flaky_test_workflow_marks_dispatch_failed_when_dispatcher_raises() -> N
         else:
             raise AssertionError("Expected TaskDispatchError when dispatcher fails")
 
-        stored = db.query(FlakyTestRun).one()
+        stored = db_session.query(FlakyTestRun).one()
         assert stored.status == "dispatch_failed"
     finally:
-        db.close()
+        pass
 
 
-def test_github_webhook_workflow_reuses_existing_record_for_same_delivery_id() -> None:
-    db = make_test_db()
+def test_github_webhook_workflow_reuses_existing_record_for_same_delivery_id(
+    db_session: Session,
+) -> None:
     try:
-        pr_service = PullRequestService(db)
+        pr_service = PullRequestService(db_session)
         dispatcher = Mock()
         webhook_service = GitHubWebhookService()
         raw_body = b"{}"
@@ -648,7 +627,7 @@ def test_github_webhook_workflow_reuses_existing_record_for_same_delivery_id() -
         assert first is not None
         assert second is not None
         assert first.id == second.id
-        assert db.query(PullRequestRecord).count() == 1
+        assert db_session.query(PullRequestRecord).count() == 1
         dispatcher.dispatch_pull_request_analysis.assert_called_once_with(first.id)
     finally:
-        db.close()
+        pass

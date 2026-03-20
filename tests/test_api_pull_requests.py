@@ -1,176 +1,101 @@
-from collections.abc import Generator
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
-from app.db.session import get_db
 from app.main import app
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
-from app.services.exceptions import TaskDispatchError
 from app.api.routes import get_pull_request_analysis_workflow_service
+from app.services.exceptions import TaskDispatchError
 
 
-def make_test_db() -> Session:
-    engine = create_engine(
-        "sqlite://",
-        future=True,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+def test_create_pull_request_analysis_enqueues_job(client: TestClient, db_session: Session) -> None:
+    payload = {
+        "repo_full_name": "acme/payments",
+        "pr_number": 42,
+        "title": "Refactor payment retry flow",
+        "author": "alice",
+        "diff_text": "+++ services/payment.py\n+ retry_count += 1",
+    }
+
+    with patch("app.api.routes.TaskDispatcher.dispatch_pull_request_analysis") as dispatch_mock:
+        response = client.post("/api/v1/pull-requests/analyze", json=payload)
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["summary"] is None
+    assert body["risks"] is None
+    assert body["suggested_tests"] is None
+
+    record = db_session.get(PullRequestRecord, body["id"])
+    assert record is not None
+    assert record.repo_full_name == "acme/payments"
+    dispatch_mock.assert_called_once_with(record.id)
+
+
+def test_get_pull_request_analysis_returns_latest_analysis(
+    client: TestClient, db_session: Session
+) -> None:
+    record = PullRequestRecord(
+        repo_full_name="acme/payments",
+        pr_number=42,
+        title="Refactor payment retry flow",
+        author="alice",
+        diff_text="+++ services/payment.py\n+ retry_count += 1",
+        status="completed",
     )
-    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
-    Base.metadata.create_all(bind=engine)
-    return TestingSessionLocal()
+    db_session.add(record)
+    db_session.commit()
+    db_session.refresh(record)
+
+    db_session.add(
+        PullRequestAnalysis(
+            pull_request_id=record.id,
+            summary="PR analysis summary",
+            risks="PR analysis risks",
+            suggested_tests="PR analysis suggested tests",
+            model_provider="mock",
+        )
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/pull-requests/{record.id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": record.id,
+        "repo_full_name": "acme/payments",
+        "pr_number": 42,
+        "title": "Refactor payment retry flow",
+        "author": "alice",
+        "status": "completed",
+        "summary": "PR analysis summary",
+        "risks": "PR analysis risks",
+        "suggested_tests": "PR analysis suggested tests",
+        "created_at": response.json()["created_at"],
+    }
 
 
-def test_create_pull_request_analysis_enqueues_job() -> None:
-    db = make_test_db()
+def test_get_pull_request_analysis_returns_404_when_missing(client: TestClient) -> None:
+    response = client.get("/api/v1/pull-requests/999")
 
-    def override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield db
-        finally:
-            pass
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Pull request not found"}
 
-    app.dependency_overrides[get_db] = override_get_db
 
-    try:
-        client = TestClient(app)
-        payload = {
+def test_create_pull_request_analysis_returns_422_for_invalid_payload(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/pull-requests/analyze",
+        json={
             "repo_full_name": "acme/payments",
-            "pr_number": 42,
+            "pr_number": "not-an-int",
             "title": "Refactor payment retry flow",
             "author": "alice",
-            "diff_text": "+++ services/payment.py\n+ retry_count += 1",
-        }
+        },
+    )
 
-        with patch("app.api.routes.TaskDispatcher.dispatch_pull_request_analysis") as dispatch_mock:
-            response = client.post("/api/v1/pull-requests/analyze", json=payload)
-
-        assert response.status_code == 202
-        body = response.json()
-        assert body["status"] == "queued"
-        assert body["summary"] is None
-        assert body["risks"] is None
-        assert body["suggested_tests"] is None
-
-        record = db.get(PullRequestRecord, body["id"])
-        assert record is not None
-        assert record.repo_full_name == "acme/payments"
-        dispatch_mock.assert_called_once_with(record.id)
-    finally:
-        app.dependency_overrides.clear()
-        db.close()
-
-
-def test_get_pull_request_analysis_returns_latest_analysis() -> None:
-    db = make_test_db()
-
-    def override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield db
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        record = PullRequestRecord(
-            repo_full_name="acme/payments",
-            pr_number=42,
-            title="Refactor payment retry flow",
-            author="alice",
-            diff_text="+++ services/payment.py\n+ retry_count += 1",
-            status="completed",
-        )
-        db.add(record)
-        db.commit()
-        db.refresh(record)
-
-        db.add(
-            PullRequestAnalysis(
-                pull_request_id=record.id,
-                summary="PR analysis summary",
-                risks="PR analysis risks",
-                suggested_tests="PR analysis suggested tests",
-                model_provider="mock",
-            )
-        )
-        db.commit()
-
-        client = TestClient(app)
-        response = client.get(f"/api/v1/pull-requests/{record.id}")
-
-        assert response.status_code == 200
-        assert response.json() == {
-            "id": record.id,
-            "repo_full_name": "acme/payments",
-            "pr_number": 42,
-            "title": "Refactor payment retry flow",
-            "author": "alice",
-            "status": "completed",
-            "summary": "PR analysis summary",
-            "risks": "PR analysis risks",
-            "suggested_tests": "PR analysis suggested tests",
-            "created_at": response.json()["created_at"],
-        }
-    finally:
-        app.dependency_overrides.clear()
-        db.close()
-
-
-def test_get_pull_request_analysis_returns_404_when_missing() -> None:
-    db = make_test_db()
-
-    def override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield db
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        client = TestClient(app)
-        response = client.get("/api/v1/pull-requests/999")
-
-        assert response.status_code == 404
-        assert response.json() == {"detail": "Pull request not found"}
-    finally:
-        app.dependency_overrides.clear()
-        db.close()
-
-
-def test_create_pull_request_analysis_returns_422_for_invalid_payload() -> None:
-    db = make_test_db()
-
-    def override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield db
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        client = TestClient(app)
-        response = client.post(
-            "/api/v1/pull-requests/analyze",
-            json={
-                "repo_full_name": "acme/payments",
-                "pr_number": "not-an-int",
-                "title": "Refactor payment retry flow",
-                "author": "alice",
-            },
-        )
-
-        assert response.status_code == 422
-    finally:
-        app.dependency_overrides.clear()
-        db.close()
+    assert response.status_code == 422
 
 
 def test_create_pull_request_analysis_returns_503_when_dispatch_fails() -> None:
@@ -178,12 +103,6 @@ def test_create_pull_request_analysis_returns_503_when_dispatch_fails() -> None:
         def enqueue_analysis(self, payload: object) -> object:
             raise TaskDispatchError("Failed to dispatch pull request analysis for record 1")
 
-    db = make_test_db()
-
-    def override_get_db() -> Generator[Session, None, None]:
-        yield db
-
-    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_pull_request_analysis_workflow_service] = lambda: FailingWorkflow()
 
     try:
@@ -203,4 +122,3 @@ def test_create_pull_request_analysis_returns_503_when_dispatch_fails() -> None:
         assert "Failed to dispatch pull request analysis" in response.json()["detail"]
     finally:
         app.dependency_overrides.clear()
-        db.close()

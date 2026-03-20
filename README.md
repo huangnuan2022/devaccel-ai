@@ -93,6 +93,23 @@ If your local PostgreSQL schema predates Alembic adoption, apply the transitiona
 psql "postgresql://devaccel:devaccel@localhost:5433/devaccel" -f infra/sql/001_add_pull_request_github_columns.sql
 alembic stamp head
 ```
+
+### 3.5 Prepare the test database
+
+Database-backed tests now use PostgreSQL plus Alembic instead of SQLite `create_all(...)`.
+Set `TEST_DATABASE_URL` to a dedicated test database and create it once before running pytest:
+
+```bash
+psql "postgresql://devaccel:devaccel@localhost:5433/postgres" -c "CREATE DATABASE devaccel_test"
+.venv/bin/python -m pytest tests/ -vv
+```
+
+If `devaccel_test` already exists, PostgreSQL will report that and you can ignore it.
+The test fixture now refuses to reset databases that:
+
+- match `DATABASE_URL`
+- do not end with `_test`
+- point at a non-local host
 ### 4. Start the API
 
 ```bash
@@ -183,7 +200,7 @@ Implemented in the current MVP:
 - Async task dispatch with explicit queued/completed/dispatch_failed state handling
 - Delivery-id deduplication for GitHub webhook ingestion
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
-- Automated tests across API, service, and task layers
+- Automated tests across API, service, and task layers using a dedicated PostgreSQL test database
 
 Planned next steps:
 
