@@ -82,6 +82,8 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=...
 ```
 
+The OpenAI path now uses schema-constrained structured outputs via the Responses API instead of relying only on prompt-level JSON instructions.
+
 The repository still defaults to `mock` until you explicitly opt into the real provider.
 
 ### 2. Start local dependencies
@@ -209,7 +211,7 @@ Implemented in the current MVP:
 - Async task dispatch with explicit queued/completed/dispatch_failed state handling
 - Delivery-id deduplication for GitHub webhook ingestion
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
-- Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option
+- Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option using structured outputs
 - Background jobs now persist failure status and error_message when provider/content retrieval fails
 - Provider/model/timing logs now cover LLM invocations plus key GitHub patch-fetch workflow steps
 - Automated tests across API, service, and task layers using a dedicated PostgreSQL test database

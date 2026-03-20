@@ -397,15 +397,22 @@ def test_llm_client_rejects_provider_names_that_are_not_wired_yet() -> None:
 
 def test_openai_provider_parses_pull_request_analysis_json() -> None:
     class FakeResponse:
-        output_text = (
-            '{"summary":"summary text","risks":"risk text","suggested_tests":"1. test"}'
-        )
+        def __init__(self) -> None:
+            self.output_parsed = type(
+                "ParsedPayload",
+                (),
+                {
+                    "summary": "summary text",
+                    "risks": "risk text",
+                    "suggested_tests": "1. test",
+                },
+            )()
 
     class FakeResponsesAPI:
         def __init__(self) -> None:
             self.last_kwargs: dict[str, object] | None = None
 
-        def create(self, **kwargs: object) -> FakeResponse:
+        def parse(self, **kwargs: object) -> FakeResponse:
             self.last_kwargs = kwargs
             return FakeResponse()
 
@@ -426,17 +433,18 @@ def test_openai_provider_parses_pull_request_analysis_json() -> None:
     assert fake_client.responses.last_kwargs["model"] == "gpt-4o-mini"
     assert fake_client.responses.last_kwargs["instructions"] == "system"
     assert fake_client.responses.last_kwargs["input"] == "user"
+    assert fake_client.responses.last_kwargs["text_format"].__name__ == "_PullRequestAnalysisPayload"
     assert result.summary == "summary text"
     assert result.risks == "risk text"
     assert result.suggested_tests == "1. test"
 
 
-def test_openai_provider_rejects_non_json_output() -> None:
+def test_openai_provider_rejects_missing_structured_output() -> None:
     class FakeResponse:
-        output_text = "not json"
+        output_parsed = None
 
     class FakeResponsesAPI:
-        def create(self, **kwargs: object) -> FakeResponse:
+        def parse(self, **kwargs: object) -> FakeResponse:
             return FakeResponse()
 
     class FakeOpenAIClient:
@@ -452,9 +460,9 @@ def test_openai_provider_rejects_non_json_output() -> None:
             failure_log="TimeoutError",
         )
     except LLMProviderInvocationError as exc:
-        assert "valid JSON" in str(exc)
+        assert "expected schema" in str(exc)
     else:
-        raise AssertionError("Expected LLMProviderInvocationError for non-JSON OpenAI output")
+        raise AssertionError("Expected LLMProviderInvocationError for missing structured output")
 
 
 def test_github_app_auth_service_returns_cached_token_before_expiry() -> None:

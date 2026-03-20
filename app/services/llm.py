@@ -1,10 +1,10 @@
-import json
 import logging
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.services.exceptions import LLMProviderConfigurationError, LLMProviderInvocationError
@@ -12,6 +12,7 @@ from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class LLMAnalysisResult:
@@ -22,6 +23,18 @@ class LLMAnalysisResult:
 
 @dataclass
 class FlakyTriageResult:
+    cluster_key: str
+    suspected_root_cause: str
+    suggested_fix: str
+
+
+class _PullRequestAnalysisPayload(BaseModel):
+    summary: str
+    risks: str
+    suggested_tests: str
+
+
+class _FlakyTriagePayload(BaseModel):
     cluster_key: str
     suspected_root_cause: str
     suggested_fix: str
@@ -99,12 +112,11 @@ class OpenAILLMProvider:
         del diff_text, title
         started_at = time.perf_counter()
         try:
-            response_text = self._generate_text(prompt)
-            payload = self._parse_json_object(response_text)
+            payload = self._generate_structured_output(prompt, _PullRequestAnalysisPayload)
             result = LLMAnalysisResult(
-                summary=self._require_text_field(payload, "summary"),
-                risks=self._require_text_field(payload, "risks"),
-                suggested_tests=self._require_text_field(payload, "suggested_tests"),
+                summary=payload.summary,
+                risks=payload.risks,
+                suggested_tests=payload.suggested_tests,
             )
         except LLMProviderInvocationError:
             logger.warning(
@@ -127,12 +139,11 @@ class OpenAILLMProvider:
         del test_name, failure_log
         started_at = time.perf_counter()
         try:
-            response_text = self._generate_text(prompt)
-            payload = self._parse_json_object(response_text)
+            payload = self._generate_structured_output(prompt, _FlakyTriagePayload)
             result = FlakyTriageResult(
-                cluster_key=self._require_text_field(payload, "cluster_key"),
-                suspected_root_cause=self._require_text_field(payload, "suspected_root_cause"),
-                suggested_fix=self._require_text_field(payload, "suggested_fix"),
+                cluster_key=payload.cluster_key,
+                suspected_root_cause=payload.suspected_root_cause,
+                suggested_fix=payload.suggested_fix,
             )
         except LLMProviderInvocationError:
             logger.warning(
@@ -149,37 +160,27 @@ class OpenAILLMProvider:
         )
         return result
 
-    def _generate_text(self, prompt: PromptSet) -> str:
+    def _generate_structured_output(
+        self,
+        prompt: PromptSet,
+        text_format: type[_PullRequestAnalysisPayload] | type[_FlakyTriagePayload],
+    ) -> _PullRequestAnalysisPayload | _FlakyTriagePayload:
         try:
-            response = self.client.responses.create(
+            response = self.client.responses.parse(
                 model=self.model,
                 instructions=prompt.system_prompt,
                 input=prompt.user_prompt,
+                text_format=text_format,
             )
         except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
             raise LLMProviderInvocationError(f"OpenAI request failed: {exc}") from exc
 
-        output_text = getattr(response, "output_text", "")
-        if not isinstance(output_text, str) or not output_text.strip():
-            raise LLMProviderInvocationError("OpenAI response did not contain output_text")
-        return output_text
-
-    def _parse_json_object(self, response_text: str) -> dict[str, object]:
-        try:
-            payload = json.loads(response_text)
-        except json.JSONDecodeError as exc:
-            raise LLMProviderInvocationError("OpenAI response was not valid JSON") from exc
-        if not isinstance(payload, dict):
-            raise LLMProviderInvocationError("OpenAI response JSON must be an object")
-        return payload
-
-    def _require_text_field(self, payload: dict[str, object], field_name: str) -> str:
-        value = payload.get(field_name)
-        if not isinstance(value, str) or not value.strip():
+        payload = getattr(response, "output_parsed", None)
+        if payload is None:
             raise LLMProviderInvocationError(
-                f"OpenAI response JSON must include non-empty string field '{field_name}'"
+                "OpenAI structured output did not match the expected schema"
             )
-        return value.strip()
+        return payload
 
 
 class LLMClient:
