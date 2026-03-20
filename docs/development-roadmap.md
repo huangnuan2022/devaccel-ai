@@ -46,6 +46,13 @@ Goals:
 3. Add retry-safe async processing semantics
 4. Expand auditability for webhook, PR, and triage state transitions
 
+Current note:
+
+- Alembic is now initialized in the repository.
+- The transitional SQL in `infra/sql/001_add_pull_request_github_columns.sql` remains only for pre-Alembic local databases that need to be aligned before `alembic stamp head`.
+- Local container startup now includes a dedicated migration step before API and worker startup.
+- Test database setup still uses `Base.metadata.create_all(...)`; aligning tests with migrations is an explicit follow-up item.
+
 ## Phase 5: Platform Expansion
 
 Goals:

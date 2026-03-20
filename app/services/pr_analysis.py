@@ -30,6 +30,7 @@ class PullRequestService:
     ) -> PullRequestRecord:
         record = PullRequestRecord(
             delivery_id=delivery_id,
+            installation_id=payload.installation_id,
             repo_full_name=payload.repo_full_name,
             pr_number=payload.pr_number,
             title=payload.title,
@@ -59,6 +60,7 @@ class PullRequestService:
             diff_text = self.github_content_service.fetch_pull_request_patch_bundle(
                 record.repo_full_name,
                 record.pr_number,
+                installation_id=record.installation_id,
             )
             record.diff_text = diff_text
 

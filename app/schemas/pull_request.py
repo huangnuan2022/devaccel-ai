@@ -8,6 +8,7 @@ class PullRequestAnalyzeRequest(BaseModel):
     pr_number: int = Field(..., examples=[42])
     title: str = Field(..., examples=["Refactor payment retry flow"])
     author: str = Field(..., examples=["alice"])
+    installation_id: int | None = Field(default=None, examples=[12345678])
     diff_text: str = Field(..., description="Unified diff text")
 
 

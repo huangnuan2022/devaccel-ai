@@ -2,14 +2,25 @@ import httpx
 
 from app.core.config import get_settings
 from app.services.exceptions import GitHubPullRequestContentError
+from app.services.github_app_auth import GitHubAppAuthService
 
 
 class GitHubPullRequestContentService:
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        app_auth_service: GitHubAppAuthService | None = None,
+    ) -> None:
         self.settings = get_settings()
         self.client = client or httpx.Client(timeout=20.0)
+        self.app_auth_service = app_auth_service or GitHubAppAuthService()
 
-    def fetch_pull_request_patch_bundle(self, repo_full_name: str, pr_number: int) -> str:
+    def fetch_pull_request_patch_bundle(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        installation_id: int | None = None,
+    ) -> str:
         owner, repo = self._parse_repo_full_name(repo_full_name)
         files: list[dict] = []
         page = 1
@@ -17,7 +28,7 @@ class GitHubPullRequestContentService:
         while True:
             response = self.client.get(
                 f"{self.settings.github_api_url}/repos/{owner}/{repo}/pulls/{pr_number}/files",
-                headers=self._build_headers(),
+                headers=self._build_headers(installation_id),
                 params={"per_page": 100, "page": page},
             )
             if response.status_code >= 400:
@@ -64,12 +75,16 @@ class GitHubPullRequestContentService:
 
         return "\n".join(sections)
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, installation_id: int | None) -> dict[str, str]:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": self.settings.github_api_version,
         }
-        if self.settings.github_token:
+        if installation_id is not None:
+            headers["Authorization"] = (
+                f"Bearer {self.app_auth_service.get_installation_access_token(installation_id)}"
+            )
+        elif self.settings.github_token:
             headers["Authorization"] = f"Bearer {self.settings.github_token}"
         return headers
 

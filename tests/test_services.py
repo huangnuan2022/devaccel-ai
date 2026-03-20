@@ -12,6 +12,7 @@ from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
 from app.services.exceptions import InvalidWebhookPayloadError, TaskDispatchError
 from app.services.flaky_triage import FlakyTestService
+from app.services.github_app_auth import GitHubAppAuthService
 from app.services.github import GitHubWebhookService
 from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
@@ -88,6 +89,7 @@ def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholde
             pr_number=42,
             title="Refactor payment retry flow",
             author="alice",
+            installation_id=98765,
             diff_text=WEBHOOK_DIFF_PLACEHOLDER,
         )
 
@@ -101,6 +103,7 @@ def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholde
         github_content_service.fetch_pull_request_patch_bundle.assert_called_once_with(
             "acme/payments",
             42,
+            installation_id=98765,
         )
     finally:
         db.close()
@@ -217,6 +220,58 @@ def test_github_pr_content_service_builds_patch_bundle_from_file_patches() -> No
     assert "assets/logo.png" not in bundle
 
 
+def test_github_pr_content_service_uses_installation_token_when_installation_id_is_present() -> None:
+    class FakeResponse:
+        def __init__(self, status_code: int, payload: object) -> None:
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self) -> object:
+            return self._payload
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.last_headers: dict[str, str] | None = None
+
+        def get(self, url: str, headers: dict[str, str], params: dict[str, object]) -> FakeResponse:
+            self.last_headers = headers
+            if params["page"] == 1:
+                return FakeResponse(
+                    200,
+                    [
+                        {
+                            "filename": "app/services/payment.py",
+                            "status": "modified",
+                            "patch": "@@ -1 +1 @@\n-old\n+new",
+                        }
+                    ],
+                )
+            return FakeResponse(200, [])
+
+    auth_service = Mock()
+    auth_service.get_installation_access_token.return_value = "installation-token"
+    client = FakeClient()
+    service = GitHubPullRequestContentService(
+        client=client,  # type: ignore[arg-type]
+        app_auth_service=auth_service,
+    )
+
+    service.fetch_pull_request_patch_bundle("acme/payments", 42, installation_id=999)
+
+    assert client.last_headers is not None
+    assert client.last_headers["Authorization"] == "Bearer installation-token"
+    auth_service.get_installation_access_token.assert_called_once_with(999)
+
+
+def test_github_app_auth_service_returns_cached_token_before_expiry() -> None:
+    service = GitHubAppAuthService(client=Mock())
+    service._token_cache[123] = ("cached-token", None)
+
+    token = service.get_installation_access_token(123)
+
+    assert token == "cached-token"
+
+
 def test_github_webhook_service_returns_internal_request_for_supported_event() -> None:
     service = GitHubWebhookService()
     raw_body = b"{}"
@@ -224,6 +279,7 @@ def test_github_webhook_service_returns_internal_request_for_supported_event() -
     payload = {
         "action": "opened",
         "number": 42,
+        "installation": {"id": 98765},
         "pull_request": {
             "title": "Refactor payment retry flow",
             "user": {"login": "alice"},
@@ -244,6 +300,7 @@ def test_github_webhook_service_returns_internal_request_for_supported_event() -
     assert request.pr_number == 42
     assert request.title == "Refactor payment retry flow"
     assert request.author == "alice"
+    assert request.installation_id == 98765
     assert "does not include unified diff text" in request.diff_text
 
 
@@ -266,6 +323,7 @@ def test_github_webhook_service_rejects_missing_required_fields() -> None:
 
     payload = {
         "action": "opened",
+        "installation": {"id": 98765},
         "pull_request": {
             "title": "Refactor payment retry flow",
             "user": {"login": "alice"},
@@ -286,6 +344,33 @@ def test_github_webhook_service_rejects_missing_required_fields() -> None:
         raise AssertionError("Expected InvalidWebhookPayloadError for invalid webhook payload")
 
 
+def test_github_webhook_service_requires_installation_id() -> None:
+    service = GitHubWebhookService()
+    raw_body = b"{}"
+
+    payload = {
+        "action": "opened",
+        "number": 42,
+        "pull_request": {
+            "title": "Refactor payment retry flow",
+            "user": {"login": "alice"},
+        },
+        "repository": {"full_name": "acme/payments"},
+    }
+
+    try:
+        service.handle_event(
+            event_name="pull_request",
+            signature=make_signature(service, raw_body),
+            raw_body=raw_body,
+            payload=payload,
+        )
+    except InvalidWebhookPayloadError as exc:
+        assert "installation" in str(exc)
+    else:
+        raise AssertionError("Expected InvalidWebhookPayloadError when installation is missing")
+
+
 def test_pull_request_workflow_enqueues_job_and_dispatches_task() -> None:
     db = make_test_db()
     try:
@@ -297,6 +382,7 @@ def test_pull_request_workflow_enqueues_job_and_dispatches_task() -> None:
             pr_number=42,
             title="Refactor payment retry flow",
             author="alice",
+            installation_id=98765,
             diff_text="+++ services/payment.py\n+ retry_count += 1",
         )
 
@@ -327,6 +413,7 @@ def test_pull_request_workflow_handles_github_webhook_and_dispatches_task() -> N
         payload = {
             "action": "opened",
             "number": 42,
+            "installation": {"id": 98765},
             "pull_request": {
                 "title": "Refactor payment retry flow",
                 "user": {"login": "alice"},
@@ -445,6 +532,7 @@ def test_github_webhook_workflow_reuses_existing_record_for_same_delivery_id() -
         payload = {
             "action": "opened",
             "number": 42,
+            "installation": {"id": 98765},
             "pull_request": {
                 "title": "Refactor payment retry flow",
                 "user": {"login": "alice"},

@@ -1,6 +1,9 @@
 install:
 	pip install -e ".[dev]"
 
+migrate:
+	alembic upgrade head
+
 run-api:
 	uvicorn app.main:app --reload
 

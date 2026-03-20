@@ -79,17 +79,45 @@ python -m pip install -e ".[dev]"
 docker compose up -d postgres redis
 ```
 
-### 3. Start the API
+### 3. Run database migrations
+
+```bash
+alembic upgrade head
+```
+
+If your local PostgreSQL schema predates Alembic adoption, apply the transitional SQL in `infra/sql/001_add_pull_request_github_columns.sql`, then mark the database as current:
+
+```bash
+psql "postgresql://devaccel:devaccel@localhost:5433/devaccel" -f infra/sql/001_add_pull_request_github_columns.sql
+alembic stamp head
+```
+### 4. Start the API
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-### 4. Start the worker
+### 5. Start the worker
 
 ```bash
 celery -A app.workers.celery_app worker --loglevel=info
 ```
+
+### Container-first startup path
+
+If you want Docker Compose to enforce the migration-first order, start the full stack with:
+
+```bash
+docker compose up --build
+```
+
+This now runs a dedicated `migrate` service before the API and worker start. The compose path is:
+
+1. `postgres` becomes healthy
+2. `migrate` runs `alembic upgrade head`
+3. `api` and `worker` start only after the migration step succeeds
+
+That keeps the standard local container entrypoint aligned with the repository's migration-first rule.
 
 ## Example API Calls
 
@@ -136,6 +164,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/webhooks/github \
   -d '{
     "action": "opened",
     "number": 42,
+    "installation": {"id": 12345678},
     "repository": {"full_name": "acme/payments"},
     "pull_request": {
       "title": "Refactor payment retry flow",
@@ -156,7 +185,7 @@ Implemented in the current MVP:
 
 Planned next steps:
 
-- Replace the temporary token-based GitHub API access path with installation-token flow
+- Harden installation-token refresh, observability, and failure handling for GitHub App access
 - Replace mock LLM responses with real OpenAI / Bedrock integrations
-- Add Alembic migrations for schema evolution
+- Move test database setup closer to the runtime migration path
 - Expand observability, retry handling, and deployment automation

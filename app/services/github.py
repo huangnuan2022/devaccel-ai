@@ -27,12 +27,14 @@ class GitHubWebhookService:
         pr = self._require_mapping(payload, "pull_request")
         repo = self._require_mapping(payload, "repository")
         user = self._require_mapping(pr, "user")
+        installation = self._require_mapping(payload, "installation")
 
         return PullRequestAnalyzeRequest(
             repo_full_name=self._require_str(repo, "full_name"),
             pr_number=self._require_int(payload, "number"),
             title=self._require_str(pr, "title"),
             author=self._require_str(user, "login"),
+            installation_id=self._require_int(installation, "id"),
             # GitHub webhook payload does not include a unified diff body.
             # Keep the placeholder semantically honest until a GitHub diff fetch
             # is introduced in a later integration step.
