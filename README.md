@@ -75,6 +75,15 @@ python -m pip install -e ".[dev]"
 
 The current default is `LLM_PROVIDER=mock`, which keeps PR analysis and flaky triage deterministic while the real OpenAI / Bedrock integrations are prepared behind a provider boundary.
 
+You can now switch the PR/flaky analysis path to OpenAI by setting:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+```
+
+The repository still defaults to `mock` until you explicitly opt into the real provider.
+
 ### 2. Start local dependencies
 
 ```bash
@@ -200,11 +209,12 @@ Implemented in the current MVP:
 - Async task dispatch with explicit queued/completed/dispatch_failed state handling
 - Delivery-id deduplication for GitHub webhook ingestion
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
+- Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option
 - Automated tests across API, service, and task layers using a dedicated PostgreSQL test database
 
 Planned next steps:
 
 - Harden installation-token refresh, observability, and failure handling for GitHub App access
-- Replace mock LLM responses with real OpenAI / Bedrock provider implementations behind the new prompt/provider abstraction
-- Move test database setup closer to the runtime migration path
+- Add end-to-end validation and richer failure handling for the new OpenAI provider path
+- Implement the Bedrock provider behind the same prompt/provider abstraction
 - Expand observability, retry handling, and deployment automation

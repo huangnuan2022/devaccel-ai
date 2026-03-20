@@ -1,8 +1,11 @@
+import json
 from dataclasses import dataclass
 from typing import Protocol
 
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+
 from app.core.config import get_settings
-from app.services.exceptions import LLMProviderConfigurationError
+from app.services.exceptions import LLMProviderConfigurationError, LLMProviderInvocationError
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 
 @dataclass
@@ -70,6 +73,78 @@ class MockLLMProvider:
         )
 
 
+class OpenAILLMProvider:
+    provider_name = "openai"
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None) -> None:
+        self.settings = get_settings()
+        self.model = model or self.settings.openai_model
+        if client is not None:
+            self.client = client
+            return
+        if not self.settings.openai_api_key:
+            raise LLMProviderConfigurationError(
+                "OpenAI provider requires openai_api_key before llm_provider=openai can be used"
+            )
+        self.client = OpenAI(api_key=self.settings.openai_api_key)
+
+    def analyze_pull_request(
+        self, prompt: PromptSet, *, diff_text: str, title: str
+    ) -> LLMAnalysisResult:
+        del diff_text, title
+        response_text = self._generate_text(prompt)
+        payload = self._parse_json_object(response_text)
+        return LLMAnalysisResult(
+            summary=self._require_text_field(payload, "summary"),
+            risks=self._require_text_field(payload, "risks"),
+            suggested_tests=self._require_text_field(payload, "suggested_tests"),
+        )
+
+    def triage_flaky_test(
+        self, prompt: PromptSet, *, test_name: str, failure_log: str
+    ) -> FlakyTriageResult:
+        del test_name, failure_log
+        response_text = self._generate_text(prompt)
+        payload = self._parse_json_object(response_text)
+        return FlakyTriageResult(
+            cluster_key=self._require_text_field(payload, "cluster_key"),
+            suspected_root_cause=self._require_text_field(payload, "suspected_root_cause"),
+            suggested_fix=self._require_text_field(payload, "suggested_fix"),
+        )
+
+    def _generate_text(self, prompt: PromptSet) -> str:
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                instructions=prompt.system_prompt,
+                input=prompt.user_prompt,
+            )
+        except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
+            raise LLMProviderInvocationError(f"OpenAI request failed: {exc}") from exc
+
+        output_text = getattr(response, "output_text", "")
+        if not isinstance(output_text, str) or not output_text.strip():
+            raise LLMProviderInvocationError("OpenAI response did not contain output_text")
+        return output_text
+
+    def _parse_json_object(self, response_text: str) -> dict[str, object]:
+        try:
+            payload = json.loads(response_text)
+        except json.JSONDecodeError as exc:
+            raise LLMProviderInvocationError("OpenAI response was not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise LLMProviderInvocationError("OpenAI response JSON must be an object")
+        return payload
+
+    def _require_text_field(self, payload: dict[str, object], field_name: str) -> str:
+        value = payload.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise LLMProviderInvocationError(
+                f"OpenAI response JSON must include non-empty string field '{field_name}'"
+            )
+        return value.strip()
+
+
 class LLMClient:
     """LLM application adapter.
 
@@ -107,9 +182,11 @@ class LLMClient:
         normalized = provider_name.lower().strip()
         if normalized == "mock":
             return MockLLMProvider()
-        if normalized in {"openai", "bedrock"}:
+        if normalized == "openai":
+            return OpenAILLMProvider()
+        if normalized == "bedrock":
             raise LLMProviderConfigurationError(
-                f"LLM provider '{normalized}' is not wired yet. Keep llm_provider=mock until the real "
-                "provider integration is implemented."
+                "LLM provider 'bedrock' is not wired yet. Keep llm_provider=mock or openai until the "
+                "Bedrock integration is implemented."
             )
         raise LLMProviderConfigurationError(f"Unsupported llm_provider: {provider_name}")

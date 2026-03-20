@@ -11,13 +11,14 @@ from app.schemas.pull_request import PullRequestAnalyzeRequest
 from app.services.exceptions import (
     InvalidWebhookPayloadError,
     LLMProviderConfigurationError,
+    LLMProviderInvocationError,
     TaskDispatchError,
 )
 from app.services.flaky_triage import FlakyTestService
 from app.services.github_app_auth import GitHubAppAuthService
 from app.services.github import GitHubWebhookService
 from app.services.github_pr_content import GitHubPullRequestContentService
-from app.services.llm import LLMAnalysisResult, LLMClient
+from app.services.llm import LLMAnalysisResult, LLMClient, OpenAILLMProvider
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
 from app.services.workflows import (
@@ -325,11 +326,73 @@ def test_llm_client_uses_prompt_builder_and_provider() -> None:
 
 def test_llm_client_rejects_provider_names_that_are_not_wired_yet() -> None:
     try:
-        LLMClient(provider_name="openai")
+        LLMClient(provider_name="bedrock")
     except LLMProviderConfigurationError as exc:
         assert "not wired yet" in str(exc)
     else:
-        raise AssertionError("Expected LLMProviderConfigurationError for openai provider selection")
+        raise AssertionError("Expected LLMProviderConfigurationError for bedrock provider selection")
+
+
+def test_openai_provider_parses_pull_request_analysis_json() -> None:
+    class FakeResponse:
+        output_text = (
+            '{"summary":"summary text","risks":"risk text","suggested_tests":"1. test"}'
+        )
+
+    class FakeResponsesAPI:
+        def __init__(self) -> None:
+            self.last_kwargs: dict[str, object] | None = None
+
+        def create(self, **kwargs: object) -> FakeResponse:
+            self.last_kwargs = kwargs
+            return FakeResponse()
+
+    class FakeOpenAIClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesAPI()
+
+    fake_client = FakeOpenAIClient()
+    provider = OpenAILLMProvider(client=fake_client, model="gpt-4o-mini")  # type: ignore[arg-type]
+
+    result = provider.analyze_pull_request(
+        PromptSet(system_prompt="system", user_prompt="user"),
+        diff_text="+++ file.py\n+ change",
+        title="Refactor payment retry flow",
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["model"] == "gpt-4o-mini"
+    assert fake_client.responses.last_kwargs["instructions"] == "system"
+    assert fake_client.responses.last_kwargs["input"] == "user"
+    assert result.summary == "summary text"
+    assert result.risks == "risk text"
+    assert result.suggested_tests == "1. test"
+
+
+def test_openai_provider_rejects_non_json_output() -> None:
+    class FakeResponse:
+        output_text = "not json"
+
+    class FakeResponsesAPI:
+        def create(self, **kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+    class FakeOpenAIClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesAPI()
+
+    provider = OpenAILLMProvider(client=FakeOpenAIClient(), model="gpt-4o-mini")  # type: ignore[arg-type]
+
+    try:
+        provider.triage_flaky_test(
+            PromptSet(system_prompt="system", user_prompt="user"),
+            test_name="test_retry_payment_timeout",
+            failure_log="TimeoutError",
+        )
+    except LLMProviderInvocationError as exc:
+        assert "valid JSON" in str(exc)
+    else:
+        raise AssertionError("Expected LLMProviderInvocationError for non-JSON OpenAI output")
 
 
 def test_github_app_auth_service_returns_cached_token_before_expiry() -> None:

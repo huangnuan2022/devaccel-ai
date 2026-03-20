@@ -16,3 +16,7 @@ class GitHubPullRequestContentError(Exception):
 
 class LLMProviderConfigurationError(Exception):
     pass
+
+
+class LLMProviderInvocationError(Exception):
+    pass

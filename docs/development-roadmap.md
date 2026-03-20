@@ -39,8 +39,9 @@ Goals:
 
 Current note:
 
-- Prompt construction and provider selection are now being separated from domain services.
-- The repository still runs with `llm_provider=mock` until OpenAI / Bedrock implementations are wired.
+- Prompt construction and provider selection are now separated from domain services.
+- OpenAI is now wired as the first real provider path behind the shared `LLMClient`.
+- Bedrock remains a follow-up provider on the same abstraction.
 
 ## Phase 4: Data and Reliability
 
