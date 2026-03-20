@@ -1,88 +1,97 @@
 # DevAccel-AI
 
-DevAccel-AI is an intelligent engineering platform for GitHub pull request review and flaky-test triage. This repository provides an MVP scaffold that is beginner-friendly while following common large-scale backend engineering practices.
+DevAccel-AI is a backend platform for two engineering workflows:
 
-## 1. Product Goals
+- PR Copilot: ingest pull request events, assemble review context, generate summaries and risk signals, and persist analysis output
+- Flaky-Test Triage: ingest CI failures, cluster related flakes, propose likely root causes, and persist triage results
 
-This project has two primary workflows:
+The repository currently contains a runnable MVP with clean layering for API, workflow orchestration, background jobs, persistence, and external integration points.
 
-1. PR Copilot
-   - Receive GitHub PR events
-   - Fetch diff and contextual metadata
-   - Use an LLM to generate summaries, risk signals, and suggested test cases
-   - Persist analysis results for audit and analytics
-2. Flaky-Test Triage
-   - Ingest CI failure samples
-   - Cluster related failures
-   - Propose fixes based on historical logs and prompt templates
-   - Produce traceable triage records
+## Core Capabilities
 
-## 2. Tech Stack
+- FastAPI HTTP APIs for PR analysis, flaky-test triage, and GitHub webhook ingestion
+- Celery-based background execution with Redis as the broker
+- PostgreSQL-backed persistence for PR and flaky-test records
+- Workflow/application services that separate route handling from async dispatch
+- Webhook hardening with signature validation, delivery-id idempotency, and explicit failure semantics
+- Mockable LLM and GitHub integration layers so external providers can be swapped in later
 
-- API: FastAPI
-- Async jobs: Celery + Redis
-- Primary database: PostgreSQL
-- Cache: Redis
-- Artifact and rule cache: DynamoDB
-- LLM providers: OpenAI / AWS Bedrock
-- Deployment: Docker, ECS Fargate
-- Event processing: GitHub Actions, SQS, Lambda, Step Functions
+## Architecture
 
-## 3. Project Structure
+High-level request flow:
+
+```text
+Client / GitHub Webhook
+        |
+        v
+      FastAPI
+        |
+        v
+  Workflow Services
+   |            |
+   v            v
+Domain Services  Task Dispatcher
+   |            |
+   v            v
+PostgreSQL     Celery / Redis
+                  |
+                  v
+                Worker
+                  |
+                  v
+         GitHub PR Content / LLM
+```
+
+Additional architecture details are documented in [docs/architecture.md](docs/architecture.md).
+
+## Repository Layout
 
 ```text
 app/
-  api/          # FastAPI routes
-  core/         # config and logging
-  db/           # database engine and sessions
-  models/       # SQLAlchemy models
-  schemas/      # request and response schemas
-  services/     # business services
-  tasks/        # Celery tasks
-  workers/      # worker configuration
-docs/           # public architecture and setup docs
-tests/          # automated tests
-.github/        # CI workflows
+  api/          FastAPI routes and dependency wiring
+  core/         configuration and logging
+  db/           database engine and session management
+  models/       SQLAlchemy ORM models
+  schemas/      request and response models
+  services/     domain services, workflows, GitHub adapters
+  tasks/        Celery task entrypoints
+  workers/      Celery app configuration
+docs/           public architecture and roadmap documents
+tests/          automated tests
+.github/        CI workflow definitions
 ```
 
-## 4. Local Startup
+## Local Development
 
-### Step 1: Prepare the environment
+### 1. Prepare the environment
 
 ```bash
 cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-### Step 2: Start dependencies
+### 2. Start local dependencies
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-If you run the API and Celery worker directly on your host machine, the default local endpoints are:
-
-```text
-PostgreSQL: localhost:5433
-Redis: localhost:6379
-```
-
-### Step 3: Start the API
+### 3. Start the API
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-### Step 4: Start the Celery worker
+### 4. Start the worker
 
 ```bash
 celery -A app.workers.celery_app worker --loglevel=info
 ```
 
-## 4.1 API Examples
+## Example API Calls
 
 ### Create a PR analysis job
 
@@ -123,35 +132,31 @@ curl -X POST http://127.0.0.1:8000/api/v1/flaky-tests/triage \
 curl -X POST http://127.0.0.1:8000/api/v1/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: pull_request" \
+  -H "X-GitHub-Delivery: delivery-123" \
   -d '{
     "action": "opened",
+    "number": 42,
     "repository": {"full_name": "acme/payments"},
     "pull_request": {
-      "number": 42,
       "title": "Refactor payment retry flow",
-      "body": "This PR improves retry logic.",
       "user": {"login": "alice"}
     }
   }'
 ```
 
-## 5. Recommended Learning Order
+## Current Scope
 
-If you are new to backend development, follow this order:
+Implemented in the current MVP:
 
-1. Read [docs/architecture.md](/Users/huangnuan/Downloads/DevAccel-AI/docs/architecture.md)
-2. Read [app/main.py](/Users/huangnuan/Downloads/DevAccel-AI/app/main.py)
-3. Review the API routes and schemas
-4. Review how the service layer organizes business logic
-5. Read the Celery tasks and deployment files
+- API endpoints for PR analysis, flaky-test triage, and webhook ingestion
+- Async task dispatch with explicit queued/completed/dispatch_failed state handling
+- Delivery-id deduplication for GitHub webhook ingestion
+- Worker-side GitHub PR patch retrieval path using GitHub pull request files data
+- Automated tests across API, service, and task layers
 
-## 6. Suggested Next Steps
+Planned next steps:
 
-This repository currently implements a runnable MVP scaffold. Good next steps are:
-
-- Integrate real GitHub App webhook verification
-- Integrate real OpenAI / Bedrock calls
-- Use Alembic for schema migrations
-- Add DynamoDB reads and writes
-- Post results back to GitHub Checks or comments
-- Implement a stronger flaky clustering and similarity retrieval pipeline
+- Replace the temporary token-based GitHub API access path with installation-token flow
+- Replace mock LLM responses with real OpenAI / Bedrock integrations
+- Add Alembic migrations for schema evolution
+- Expand observability, retry handling, and deployment automation

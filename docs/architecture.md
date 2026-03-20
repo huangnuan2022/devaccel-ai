@@ -76,6 +76,6 @@ Recommended order for implementation:
 
 ## 5. Why This Structure
 
-- Beginners often mix API code, business logic, and SDK calls in one place
-- This structure keeps responsibilities clear
-- It lowers the cost of testing, swapping model providers, and changing deployment targets later
+- The project keeps HTTP handling, orchestration, domain logic, and infrastructure concerns separated
+- This reduces coupling across API handlers, worker execution, and provider integrations
+- It lowers the cost of testing, replacing external providers, and evolving deployment targets over time
