@@ -25,6 +25,11 @@ class FlakyTestService:
             test_name=payload.test_name,
             suite_name=payload.suite_name,
             branch_name=payload.branch_name,
+            ci_provider=payload.ci_provider,
+            workflow_name=payload.workflow_name,
+            job_name=payload.job_name,
+            run_url=payload.run_url,
+            commit_sha=payload.commit_sha,
             failure_log=payload.failure_log,
             status="queued",
         )
@@ -33,10 +38,13 @@ class FlakyTestService:
         self.db.refresh(run)
         with bind_log_context(flaky_test_id=run.id):
             logger.info(
-                "Created flaky triage job id=%s test_name=%s branch=%s",
+                "Created flaky triage job id=%s test_name=%s branch=%s ci_provider=%s workflow_name=%s job_name=%s",
                 run.id,
                 run.test_name,
                 run.branch_name,
+                run.ci_provider,
+                run.workflow_name,
+                run.job_name,
             )
         return run
 

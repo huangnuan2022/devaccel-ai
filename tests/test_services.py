@@ -246,6 +246,11 @@ def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
             test_name="test_retry_payment_timeout",
             suite_name="payments.integration",
             branch_name="main",
+            ci_provider="github_actions",
+            workflow_name="CI",
+            job_name="pytest",
+            run_url="https://github.com/acme/payments/actions/runs/123",
+            commit_sha="abc123def456",
             failure_log="TimeoutError: operation exceeded 30 seconds",
         )
 
@@ -261,6 +266,11 @@ def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
         stored = db_session.query(FlakyTestRun).filter_by(id=run.id).one()
         assert stored.suggested_fix != ""
         assert stored.error_message is None
+        assert stored.ci_provider == "github_actions"
+        assert stored.workflow_name == "CI"
+        assert stored.job_name == "pytest"
+        assert stored.run_url == "https://github.com/acme/payments/actions/runs/123"
+        assert stored.commit_sha == "abc123def456"
     finally:
         pass
 

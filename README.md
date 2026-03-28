@@ -180,8 +180,40 @@ curl -X POST http://127.0.0.1:8000/api/v1/flaky-tests/triage \
     "test_name": "test_retry_payment_timeout",
     "suite_name": "payments.integration",
     "branch_name": "main",
+    "ci_provider": "github_actions",
+    "workflow_name": "CI",
+    "job_name": "pytest",
+    "run_url": "https://github.com/acme/payments/actions/runs/123",
+    "commit_sha": "abc123def456",
     "failure_log": "TimeoutError: operation exceeded 30 seconds"
   }'
+```
+
+This route is the current trigger point for flaky triage. In a realistic setup, your CI system
+(for example GitHub Actions) would call this endpoint after a failed test job and pass along the
+job metadata plus a trimmed failure log.
+
+Example GitHub Actions step shape:
+
+```yaml
+- name: Send flaky triage payload
+  if: failure()
+  run: |
+    curl -X POST "$DEVACCEL_API_URL/api/v1/flaky-tests/triage" \
+      -H "Content-Type: application/json" \
+      -d @- <<'JSON'
+    {
+      "test_name": "test_retry_payment_timeout",
+      "suite_name": "payments.integration",
+      "branch_name": "${{ github.ref_name }}",
+      "ci_provider": "github_actions",
+      "workflow_name": "${{ github.workflow }}",
+      "job_name": "${{ github.job }}",
+      "run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+      "commit_sha": "${{ github.sha }}",
+      "failure_log": "Trimmed test failure output goes here"
+    }
+    JSON
 ```
 
 ### Simulate a GitHub webhook
@@ -212,6 +244,7 @@ Implemented in the current MVP:
 - Delivery-id deduplication for GitHub webhook ingestion
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
 - Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option using structured outputs
+- Flaky-test triage records now accept CI metadata such as provider, workflow, job, run URL, and commit SHA so CI systems can trigger richer triage jobs
 - Background jobs now persist failure status and error_message when provider/content retrieval fails
 - Provider/model/timing logs now cover LLM invocations plus key GitHub patch-fetch workflow steps
 - Automated tests across API, service, and task layers using a dedicated PostgreSQL test database

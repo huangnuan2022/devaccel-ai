@@ -14,6 +14,11 @@ def test_create_flaky_test_triage_enqueues_job(client: TestClient, db_session: S
         "test_name": "test_retry_payment_timeout",
         "suite_name": "payments.integration",
         "branch_name": "main",
+        "ci_provider": "github_actions",
+        "workflow_name": "CI",
+        "job_name": "pytest",
+        "run_url": "https://github.com/acme/payments/actions/runs/123",
+        "commit_sha": "abc123def456",
         "failure_log": "TimeoutError: operation exceeded 30 seconds",
     }
 
@@ -31,6 +36,11 @@ def test_create_flaky_test_triage_enqueues_job(client: TestClient, db_session: S
     run = db_session.get(FlakyTestRun, body["id"])
     assert run is not None
     assert run.test_name == "test_retry_payment_timeout"
+    assert run.ci_provider == "github_actions"
+    assert run.workflow_name == "CI"
+    assert run.job_name == "pytest"
+    assert run.run_url == "https://github.com/acme/payments/actions/runs/123"
+    assert run.commit_sha == "abc123def456"
     dispatch_mock.assert_called_once_with(run.id)
 
 
@@ -41,6 +51,11 @@ def test_get_flaky_test_triage_returns_completed_result(
         test_name="test_retry_payment_timeout",
         suite_name="payments.integration",
         branch_name="main",
+        ci_provider="github_actions",
+        workflow_name="CI",
+        job_name="pytest",
+        run_url="https://github.com/acme/payments/actions/runs/123",
+        commit_sha="abc123def456",
         failure_log="TimeoutError: operation exceeded 30 seconds",
         status="completed",
         cluster_key="cluster:test_retry_payment_timeout",
@@ -59,6 +74,11 @@ def test_get_flaky_test_triage_returns_completed_result(
         "test_name": "test_retry_payment_timeout",
         "suite_name": "payments.integration",
         "branch_name": "main",
+        "ci_provider": "github_actions",
+        "workflow_name": "CI",
+        "job_name": "pytest",
+        "run_url": "https://github.com/acme/payments/actions/runs/123",
+        "commit_sha": "abc123def456",
         "status": "completed",
         "error_message": None,
         "cluster_key": "cluster:test_retry_payment_timeout",
@@ -75,6 +95,11 @@ def test_get_flaky_test_triage_returns_failed_error_message(
         test_name="test_retry_payment_timeout",
         suite_name="payments.integration",
         branch_name="main",
+        ci_provider="github_actions",
+        workflow_name="CI",
+        job_name="pytest",
+        run_url="https://github.com/acme/payments/actions/runs/123",
+        commit_sha="abc123def456",
         failure_log="TimeoutError: operation exceeded 30 seconds",
         status="failed",
         error_message="OpenAI response was not valid JSON",
@@ -91,6 +116,7 @@ def test_get_flaky_test_triage_returns_failed_error_message(
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert response.json()["error_message"] == "OpenAI response was not valid JSON"
+    assert response.json()["ci_provider"] == "github_actions"
 
 
 def test_get_flaky_test_triage_returns_404_when_missing(client: TestClient) -> None:
