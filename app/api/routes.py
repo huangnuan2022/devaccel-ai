@@ -1,4 +1,7 @@
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from app.core.log_context import bind_log_context
 from app.db.session import get_db
 from app.schemas.flaky_test import FlakyTestTriageRequest, FlakyTestTriageResponse
 from app.schemas.pull_request import PullRequestAnalysisResponse, PullRequestAnalyzeRequest
@@ -18,6 +21,7 @@ from app.services.workflows import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_github_webhook_service() -> GitHubWebhookService:
@@ -86,22 +90,25 @@ async def github_webhook(
     try:
         if not x_github_delivery.strip():
             raise InvalidWebhookPayloadError("Missing GitHub webhook delivery id")
-        record = workflow.handle_webhook(
-            event_name=x_github_event,
-            signature=x_hub_signature_256,
-            raw_body=raw_body,
-            payload=payload,
-            delivery_id=x_github_delivery,
-        )
+        with bind_log_context(delivery_id=x_github_delivery):
+            logger.info("Received GitHub webhook event=%s", x_github_event or "-")
+            record = workflow.handle_webhook(
+                event_name=x_github_event,
+                signature=x_hub_signature_256,
+                raw_body=raw_body,
+                payload=payload,
+                delivery_id=x_github_delivery,
+            )
+            if record is None:
+                return {"status": "ignored"}
+            logger.info("Accepted GitHub webhook pull_request_id=%s", record.id)
+            return {"status": "accepted", "pull_request_id": record.id}
     except InvalidWebhookSignatureError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except InvalidWebhookPayloadError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except TaskDispatchError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if record is None:
-        return {"status": "ignored"}
-    return {"status": "accepted", "pull_request_id": record.id}
 
 
 @router.post("/pull-requests/analyze", response_model=PullRequestAnalysisResponse, status_code=202)
@@ -113,6 +120,12 @@ def create_pull_request_analysis(
         record = workflow.enqueue_analysis(payload)
     except TaskDispatchError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    logger.info(
+        "Accepted pull request analysis request pull_request_id=%s repo=%s pr_number=%s",
+        record.id,
+        record.repo_full_name,
+        record.pr_number,
+    )
     return PullRequestAnalysisResponse(
         id=record.id,
         repo_full_name=record.repo_full_name,
@@ -159,6 +172,11 @@ def create_flaky_test_triage(
         run = workflow.enqueue_triage(payload)
     except TaskDispatchError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    logger.info(
+        "Accepted flaky triage request flaky_test_id=%s test_name=%s",
+        run.id,
+        run.test_name,
+    )
     return FlakyTestTriageResponse.model_validate(run)
 
 

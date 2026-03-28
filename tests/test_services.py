@@ -8,6 +8,7 @@ from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
+from app.core.log_context import bind_log_context, clear_log_context
 from app.services.exceptions import (
     GitHubPullRequestContentError,
     InvalidWebhookPayloadError,
@@ -22,6 +23,8 @@ from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.llm import LLMAnalysisResult, LLMClient, OpenAILLMProvider
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
+from app.services.task_dispatcher import TaskDispatcher
+from app.tasks.pr_analysis import analyze_pull_request_task
 from app.services.workflows import (
     FlakyTestWorkflowService,
     GitHubWebhookWorkflowService,
@@ -32,6 +35,31 @@ from app.services.workflows import (
 def make_signature(service: GitHubWebhookService, raw_body: bytes) -> str:
     secret = service.settings.github_webhook_secret
     return "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+
+
+def test_task_dispatcher_forwards_current_log_context_to_celery_headers() -> None:
+    dispatcher = TaskDispatcher()
+    original_apply_async = analyze_pull_request_task.apply_async
+    captured: dict[str, object] = {}
+
+    def fake_apply_async(*, args: list[int], headers: dict[str, str]) -> None:
+        captured["args"] = args
+        captured["headers"] = headers
+
+    analyze_pull_request_task.apply_async = fake_apply_async  # type: ignore[method-assign]
+    try:
+        clear_log_context()
+        with bind_log_context(request_id="req-123", delivery_id="delivery-123"):
+            dispatcher.dispatch_pull_request_analysis(42)
+    finally:
+        analyze_pull_request_task.apply_async = original_apply_async  # type: ignore[method-assign]
+        clear_log_context()
+
+    assert captured["args"] == [42]
+    assert captured["headers"] == {
+        "request_id": "req-123",
+        "delivery_id": "delivery-123",
+    }
 
 
 def test_pr_service_create_and_process_analysis(db_session: Session) -> None:

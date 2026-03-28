@@ -1,3 +1,6 @@
+import logging
+
+from app.core.log_context import bind_log_context
 from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
@@ -8,6 +11,8 @@ from app.services.github import GitHubWebhookService
 from app.services.pr_analysis import PullRequestService
 from app.services.task_dispatcher import TaskDispatcher
 
+logger = logging.getLogger(__name__)
+
 
 class PullRequestAnalysisWorkflowService:
     def __init__(self, pr_service: PullRequestService, dispatcher: TaskDispatcher) -> None:
@@ -17,15 +22,19 @@ class PullRequestAnalysisWorkflowService:
     def enqueue_analysis(
         self, payload: PullRequestAnalyzeRequest, delivery_id: str | None = None
     ) -> PullRequestRecord:
-        record = self.pr_service.create_analysis_job_with_delivery(payload, delivery_id=delivery_id)
-        try:
-            self.dispatcher.dispatch_pull_request_analysis(record.id)
-        except Exception as exc:
-            self.pr_service.mark_dispatch_failed(record.id, str(exc))
-            raise TaskDispatchError(
-                f"Failed to dispatch pull request analysis for record {record.id}"
-            ) from exc
-        return record
+        with bind_log_context(delivery_id=delivery_id, installation_id=payload.installation_id):
+            record = self.pr_service.create_analysis_job_with_delivery(
+                payload, delivery_id=delivery_id
+            )
+            try:
+                self.dispatcher.dispatch_pull_request_analysis(record.id)
+            except Exception as exc:
+                self.pr_service.mark_dispatch_failed(record.id, str(exc))
+                raise TaskDispatchError(
+                    f"Failed to dispatch pull request analysis for record {record.id}"
+                ) from exc
+            logger.info("Dispatched pull request analysis task pull_request_id=%s", record.id)
+            return record
 
 
 class GitHubWebhookWorkflowService:
@@ -45,19 +54,27 @@ class GitHubWebhookWorkflowService:
         payload: dict,
         delivery_id: str,
     ) -> PullRequestRecord | None:
-        existing = self.pr_analysis_workflow.pr_service.get_by_delivery_id(delivery_id)
-        if existing is not None:
-            return existing
+        with bind_log_context(delivery_id=delivery_id):
+            existing = self.pr_analysis_workflow.pr_service.get_by_delivery_id(delivery_id)
+            if existing is not None:
+                logger.info(
+                    "Reused existing pull request record for duplicate delivery pull_request_id=%s",
+                    existing.id,
+                )
+                return existing
 
-        analyze_request = self.github_webhook_service.handle_event(
-            event_name=event_name,
-            signature=signature,
-            raw_body=raw_body,
-            payload=payload,
-        )
-        if analyze_request is None:
-            return None
-        return self.pr_analysis_workflow.enqueue_analysis(analyze_request, delivery_id=delivery_id)
+            analyze_request = self.github_webhook_service.handle_event(
+                event_name=event_name,
+                signature=signature,
+                raw_body=raw_body,
+                payload=payload,
+            )
+            if analyze_request is None:
+                logger.info("Ignored GitHub webhook event=%s", event_name)
+                return None
+            return self.pr_analysis_workflow.enqueue_analysis(
+                analyze_request, delivery_id=delivery_id
+            )
 
 
 class FlakyTestWorkflowService:
@@ -72,4 +89,5 @@ class FlakyTestWorkflowService:
         except Exception as exc:
             self.flaky_test_service.mark_dispatch_failed(run.id, str(exc))
             raise TaskDispatchError(f"Failed to dispatch flaky test triage for run {run.id}") from exc
+        logger.info("Dispatched flaky triage task flaky_test_id=%s", run.id)
         return run

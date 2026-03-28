@@ -37,6 +37,7 @@ def test_github_webhook_returns_accepted_when_workflow_creates_job() -> None:
 
         assert response.status_code == 202
         assert response.json() == {"status": "accepted", "pull_request_id": 123}
+        assert response.headers["X-Request-ID"] != ""
     finally:
         app.dependency_overrides.clear()
 
@@ -68,6 +69,39 @@ def test_github_webhook_returns_ignored_when_workflow_ignores_event() -> None:
 
         assert response.status_code == 202
         assert response.json() == {"status": "ignored"}
+        assert response.headers["X-Request-ID"] != ""
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_github_webhook_preserves_supplied_request_id_header() -> None:
+    class FakeWorkflow:
+        def handle_webhook(
+            self,
+            event_name: str,
+            signature: str,
+            raw_body: bytes,
+            payload: dict,
+            delivery_id: str,
+        ) -> None:
+            return None
+
+    app.dependency_overrides[get_github_webhook_workflow_service] = lambda: FakeWorkflow()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/webhooks/github",
+            headers={
+                "X-GitHub-Event": "pull_request",
+                "X-GitHub-Delivery": "delivery-request-id",
+                "X-Request-ID": "req-explicit-123",
+            },
+            json={"action": "opened"},
+        )
+
+        assert response.status_code == 202
+        assert response.headers["X-Request-ID"] == "req-explicit-123"
     finally:
         app.dependency_overrides.clear()
 
