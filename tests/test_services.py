@@ -9,6 +9,7 @@ from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
 from app.services.exceptions import (
+    GitHubPullRequestContentError,
     InvalidWebhookPayloadError,
     LLMProviderConfigurationError,
     LLMProviderInvocationError,
@@ -472,6 +473,19 @@ def test_github_app_auth_service_returns_cached_token_before_expiry() -> None:
     token = service.get_installation_access_token(123)
 
     assert token == "cached-token"
+
+
+def test_github_app_auth_service_wraps_missing_private_key_file() -> None:
+    service = GitHubAppAuthService(client=Mock())
+    service.settings.github_app_id = "123456"
+    service.settings.github_private_key_path = "/definitely/missing/github-app.pem"
+
+    try:
+        service.get_installation_access_token(999)
+    except GitHubPullRequestContentError as exc:
+        assert "private key file could not be read" in str(exc)
+    else:
+        raise AssertionError("Expected GitHubPullRequestContentError for missing private key file")
 
 
 def test_github_webhook_service_returns_internal_request_for_supported_event() -> None:

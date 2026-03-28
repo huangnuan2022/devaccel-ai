@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -8,6 +9,9 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.core.config import get_settings
 from app.services.exceptions import GitHubPullRequestContentError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _b64url(data: bytes) -> str:
@@ -77,8 +81,27 @@ class GitHubAppAuthService:
             f"{_b64url(json.dumps(header, separators=(',', ':')).encode('utf-8'))}."
             f"{_b64url(json.dumps(payload, separators=(',', ':')).encode('utf-8'))}"
         )
-        with open(private_key_path, "rb") as key_file:
-            private_key = serialization.load_pem_private_key(key_file.read(), password=None)
+        try:
+            with open(private_key_path, "rb") as key_file:
+                private_key = serialization.load_pem_private_key(key_file.read(), password=None)
+        except OSError as exc:
+            logger.warning(
+                "GitHub App private key file could not be read path=%s error=%s",
+                private_key_path,
+                exc,
+            )
+            raise GitHubPullRequestContentError(
+                f"GitHub App private key file could not be read: {private_key_path}"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "GitHub App private key file is invalid path=%s error=%s",
+                private_key_path,
+                exc,
+            )
+            raise GitHubPullRequestContentError(
+                f"GitHub App private key file is invalid: {private_key_path}"
+            ) from exc
         signature = private_key.sign(
             signing_input.encode("ascii"),
             padding.PKCS1v15(),
