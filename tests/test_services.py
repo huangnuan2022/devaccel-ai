@@ -37,20 +37,56 @@ def make_signature(service: GitHubWebhookService, raw_body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
 
 
+class DeterministicPRLLMClient:
+    provider_name = "mock"
+
+    def analyze_pull_request(self, diff_text: str, title: str) -> LLMAnalysisResult:
+        return LLMAnalysisResult(
+            summary=f"PR '{title}' changes {len(diff_text.splitlines())} diff lines.",
+            risks="Potential regression around error handling, database writes, and edge-case retries.",
+            suggested_tests=(
+                "1. Add success-path regression test.\n"
+                "2. Add failure-path test for invalid inputs.\n"
+                "3. Add integration test covering retry/idempotency behavior."
+            ),
+        )
+
+
+class DeterministicFlakyLLMClient:
+    provider_name = "mock"
+
+    def triage_flaky_test(self, test_name: str, failure_log: str) -> object:
+        return type(
+            "TriageResult",
+            (),
+            {
+                "cluster_key": f"cluster:{test_name}",
+                "suspected_root_cause": (
+                    "Likely timeout under CI load caused the operation to exceed its deadline."
+                ),
+                "suggested_fix": "Increase timeout thresholds and stabilize async retry timing.",
+            },
+        )()
+
+
 def test_task_dispatcher_forwards_current_log_context_to_celery_headers() -> None:
     dispatcher = TaskDispatcher()
     original_apply_async = analyze_pull_request_task.apply_async
     captured: dict[str, object] = {}
 
-    def fake_apply_async(*, args: list[int], headers: dict[str, str]) -> None:
+    class FakeAsyncResult:
+        id = "celery-task-123"
+
+    def fake_apply_async(*, args: list[int], headers: dict[str, str]) -> FakeAsyncResult:
         captured["args"] = args
         captured["headers"] = headers
+        return FakeAsyncResult()
 
     analyze_pull_request_task.apply_async = fake_apply_async  # type: ignore[method-assign]
     try:
         clear_log_context()
         with bind_log_context(request_id="req-123", delivery_id="delivery-123"):
-            dispatcher.dispatch_pull_request_analysis(42)
+            task_id = dispatcher.dispatch_pull_request_analysis(42)
     finally:
         analyze_pull_request_task.apply_async = original_apply_async  # type: ignore[method-assign]
         clear_log_context()
@@ -60,6 +96,7 @@ def test_task_dispatcher_forwards_current_log_context_to_celery_headers() -> Non
         "request_id": "req-123",
         "delivery_id": "delivery-123",
     }
+    assert task_id == "celery-task-123"
 
 
 def test_pr_service_create_and_process_analysis(db_session: Session) -> None:
@@ -70,7 +107,7 @@ def test_pr_service_create_and_process_analysis(db_session: Session) -> None:
     # 3. 你已经有 service
     # 4. 但 route / Celery 还可以晚一点再测
     try:
-        service = PullRequestService(db_session)
+        service = PullRequestService(db_session, llm_client=DeterministicPRLLMClient())  # type: ignore[arg-type]
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
             pr_number=42,
@@ -101,7 +138,11 @@ def test_pr_service_process_analysis_fetches_patch_bundle_for_webhook_placeholde
         github_content_service.fetch_pull_request_patch_bundle.return_value = (
             "diff --git a/app.py b/app.py\n@@ -1 +1 @@\n-print('old')\n+print('new')"
         )
-        service = PullRequestService(db_session, github_content_service=github_content_service)
+        service = PullRequestService(
+            db_session,
+            llm_client=DeterministicPRLLMClient(),  # type: ignore[arg-type]
+            github_content_service=github_content_service,
+        )
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
             pr_number=42,
@@ -200,7 +241,7 @@ def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
     # 2. 想先确认 triage 核心流程正确
     # 3. 还没有把 HTTP / Celery 全部卷进来
     try:
-        service = FlakyTestService(db_session)
+        service = FlakyTestService(db_session, llm_client=DeterministicFlakyLLMClient())  # type: ignore[arg-type]
         payload = FlakyTestTriageRequest(
             test_name="test_retry_payment_timeout",
             suite_name="payments.integration",

@@ -27,13 +27,18 @@ class PullRequestAnalysisWorkflowService:
                 payload, delivery_id=delivery_id
             )
             try:
-                self.dispatcher.dispatch_pull_request_analysis(record.id)
+                task_id = self.dispatcher.dispatch_pull_request_analysis(record.id)
             except Exception as exc:
                 self.pr_service.mark_dispatch_failed(record.id, str(exc))
                 raise TaskDispatchError(
                     f"Failed to dispatch pull request analysis for record {record.id}"
                 ) from exc
-            logger.info("Dispatched pull request analysis task pull_request_id=%s", record.id)
+            with bind_log_context(task_id=task_id, pull_request_id=record.id):
+                logger.info(
+                    "Dispatched pull request analysis task pull_request_id=%s task_id=%s",
+                    record.id,
+                    task_id,
+                )
             return record
 
 
@@ -85,9 +90,14 @@ class FlakyTestWorkflowService:
     def enqueue_triage(self, payload: FlakyTestTriageRequest) -> FlakyTestRun:
         run = self.flaky_test_service.create_triage_job(payload)
         try:
-            self.dispatcher.dispatch_flaky_test_triage(run.id)
+            task_id = self.dispatcher.dispatch_flaky_test_triage(run.id)
         except Exception as exc:
             self.flaky_test_service.mark_dispatch_failed(run.id, str(exc))
             raise TaskDispatchError(f"Failed to dispatch flaky test triage for run {run.id}") from exc
-        logger.info("Dispatched flaky triage task flaky_test_id=%s", run.id)
+        with bind_log_context(task_id=task_id, flaky_test_id=run.id):
+            logger.info(
+                "Dispatched flaky triage task flaky_test_id=%s task_id=%s",
+                run.id,
+                task_id,
+            )
         return run

@@ -4,14 +4,16 @@ from app.tasks.pr_analysis import analyze_pull_request_task
 
 
 class TaskDispatcher:
-    def dispatch_pull_request_analysis(self, pull_request_id: int) -> None:
-        analyze_pull_request_task.apply_async(
+    def dispatch_pull_request_analysis(self, pull_request_id: int) -> str | None:
+        task = analyze_pull_request_task.apply_async(
             args=[pull_request_id],
             headers=get_serialized_log_context(),
         )
+        return task.id
 
-    def dispatch_flaky_test_triage(self, flaky_test_id: int) -> None:
-        triage_flaky_test_task.apply_async(
+    def dispatch_flaky_test_triage(self, flaky_test_id: int) -> str | None:
+        task = triage_flaky_test_task.apply_async(
             args=[flaky_test_id],
             headers=get_serialized_log_context(),
         )
+        return task.id
