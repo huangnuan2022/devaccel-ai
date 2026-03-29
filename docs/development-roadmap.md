@@ -72,6 +72,11 @@ Goals:
 3. Improve flaky clustering and historical retrieval quality
 4. Add GitHub Checks / comment write-back
 
+Current note:
+
+- Workflow services now depend on a generic async dispatch boundary instead of only a Celery-specific return shape.
+- The current `TaskDispatcher` is explicitly the Celery adapter for that boundary, which keeps the local MVP intact while making the next SQS / Step Functions adapter additive instead of disruptive.
+
 ## Phase 6: Production Readiness
 
 Goals:

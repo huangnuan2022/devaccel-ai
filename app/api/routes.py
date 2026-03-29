@@ -6,6 +6,7 @@ from app.core.log_context import bind_log_context
 from app.db.session import get_db
 from app.schemas.flaky_test import FlakyTestTriageRequest, FlakyTestTriageResponse
 from app.schemas.pull_request import PullRequestAnalysisResponse, PullRequestAnalyzeRequest
+from app.services.async_dispatch import AsyncWorkflowDispatcher
 from app.services.exceptions import (
     InvalidWebhookPayloadError,
     InvalidWebhookSignatureError,
@@ -14,6 +15,7 @@ from app.services.exceptions import (
 from app.services.flaky_triage import FlakyTestService
 from app.services.github import GitHubWebhookService
 from app.services.pr_analysis import PullRequestService
+from app.services.step_functions_dispatcher import StepFunctionsDispatcher
 from app.services.task_dispatcher import TaskDispatcher
 from app.services.workflows import (
     FlakyTestWorkflowService,
@@ -29,8 +31,13 @@ def get_github_webhook_service() -> GitHubWebhookService:
     return GitHubWebhookService()
 
 
-def get_task_dispatcher() -> TaskDispatcher:
-    return TaskDispatcher()
+def get_task_dispatcher() -> AsyncWorkflowDispatcher:
+    backend = get_settings().async_dispatch_backend.strip().lower()
+    if backend == "celery":
+        return TaskDispatcher()
+    if backend in {"sqs_step_functions", "step_functions"}:
+        return StepFunctionsDispatcher()
+    raise RuntimeError(f"Unsupported async_dispatch_backend: {backend}")
 
 
 def get_pull_request_service(db=Depends(get_db)) -> PullRequestService:
@@ -43,8 +50,8 @@ def get_flaky_test_service(db=Depends(get_db)) -> FlakyTestService:
 
 def get_pull_request_analysis_workflow_service(
     pr_service: PullRequestService = Depends(get_pull_request_service),
-    dispatcher: TaskDispatcher = Depends(get_task_dispatcher),
-    ) -> PullRequestAnalysisWorkflowService:
+    dispatcher: AsyncWorkflowDispatcher = Depends(get_task_dispatcher),
+) -> PullRequestAnalysisWorkflowService:
     return PullRequestAnalysisWorkflowService(
         pr_service=pr_service,
         dispatcher=dispatcher,
@@ -65,7 +72,7 @@ def get_github_webhook_workflow_service(
 
 def get_flaky_test_workflow_service(
     flaky_test_service: FlakyTestService = Depends(get_flaky_test_service),
-    dispatcher: TaskDispatcher = Depends(get_task_dispatcher),
+    dispatcher: AsyncWorkflowDispatcher = Depends(get_task_dispatcher),
 ) -> FlakyTestWorkflowService:
     return FlakyTestWorkflowService(
         flaky_test_service=flaky_test_service,

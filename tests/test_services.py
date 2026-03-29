@@ -1,14 +1,18 @@
 import hashlib
 import hmac
+import json
 from unittest.mock import Mock
 
 from sqlalchemy.orm import Session
 
+from app.api.routes import get_task_dispatcher
 from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
+from app.core.config import get_settings
 from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
 from app.core.log_context import bind_log_context, clear_log_context
+from app.services.async_dispatch import AsyncDispatchResult
 from app.services.exceptions import (
     GitHubPullRequestContentError,
     InvalidWebhookPayloadError,
@@ -23,6 +27,7 @@ from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.llm import LLMAnalysisResult, LLMClient, OpenAILLMProvider
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
 from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
+from app.services.step_functions_dispatcher import StepFunctionsDispatcher
 from app.services.task_dispatcher import TaskDispatcher
 from app.tasks.pr_analysis import analyze_pull_request_task
 from app.services.workflows import (
@@ -96,7 +101,57 @@ def test_task_dispatcher_forwards_current_log_context_to_celery_headers() -> Non
         "request_id": "req-123",
         "delivery_id": "delivery-123",
     }
-    assert task_id == "celery-task-123"
+    assert task_id.task_id == "celery-task-123"
+    assert task_id.backend_name == "celery"
+
+
+def test_step_functions_dispatcher_starts_execution_with_trace_context() -> None:
+    captured: dict[str, object] = {}
+    expected_arn = "arn:aws:states:us-east-1:123456789012:stateMachine:devaccel-analysis"
+
+    class FakeStepFunctionsClient:
+        def start_execution(self, **kwargs: object) -> dict[str, str]:
+            captured.update(kwargs)
+            return {"executionArn": "arn:aws:states:execution:devaccel:123"}
+
+    settings = get_settings()
+    original_arn = settings.step_functions_state_machine_arn
+    settings.step_functions_state_machine_arn = expected_arn
+
+    try:
+        clear_log_context()
+        dispatcher = StepFunctionsDispatcher(client=FakeStepFunctionsClient(), settings=settings)
+        with bind_log_context(request_id="req-123", delivery_id="delivery-123"):
+            result = dispatcher.dispatch_pull_request_analysis(42)
+    finally:
+        settings.step_functions_state_machine_arn = original_arn
+        clear_log_context()
+
+    assert captured["stateMachineArn"] == expected_arn
+    payload = json.loads(captured["input"])
+    assert payload == {
+        "workflow_name": "pull_request_analysis",
+        "resource_id": 42,
+        "trace_context": {
+            "request_id": "req-123",
+            "delivery_id": "delivery-123",
+        },
+    }
+    assert result.task_id == "arn:aws:states:execution:devaccel:123"
+    assert result.backend_name == "sqs_step_functions"
+
+
+def test_get_task_dispatcher_uses_step_functions_backend_when_configured() -> None:
+    settings = get_settings()
+    original_backend = settings.async_dispatch_backend
+    settings.async_dispatch_backend = "sqs_step_functions"
+
+    try:
+        dispatcher = get_task_dispatcher()
+    finally:
+        settings.async_dispatch_backend = original_backend
+
+    assert isinstance(dispatcher, StepFunctionsDispatcher)
 
 
 def test_pr_service_create_and_process_analysis(db_session: Session) -> None:
@@ -333,6 +388,60 @@ def test_flaky_service_falls_back_to_test_name_when_cluster_key_is_placeholder(d
     processed = service.process_triage(run.id)
 
     assert processed.cluster_key == "cluster:test_retry_payment_timeout"
+
+
+def test_flaky_service_reuses_similar_historical_cluster_key(db_session: Session) -> None:
+    historical = FlakyTestRun(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+        status="completed",
+        cluster_key="cluster:timeout_under_ci_load",
+        suspected_root_cause="CI load spikes requests.",
+        suggested_fix="Increase explicit waits.",
+    )
+    db_session.add(historical)
+    db_session.commit()
+
+    class SimilarClusterLLMClient:
+        provider_name = "openai"
+
+        def triage_flaky_test(self, test_name: str, failure_log: str) -> object:
+            del test_name, failure_log
+            return type(
+                "TriageResult",
+                (),
+                {
+                    "cluster_key": "Timeout CI Load",
+                    "suspected_root_cause": "CI load spikes requests.",
+                    "suggested_fix": "Increase explicit waits.",
+                },
+            )()
+
+    service = FlakyTestService(db_session, llm_client=SimilarClusterLLMClient())  # type: ignore[arg-type]
+    payload = FlakyTestTriageRequest(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+    )
+
+    run = service.create_triage_job(payload)
+    processed = service.process_triage(run.id)
+
+    assert processed.cluster_key == "cluster:timeout_under_ci_load"
+
+
+def test_prompt_builder_guides_flaky_cluster_key_toward_stable_snake_case() -> None:
+    prompt = LLMPromptBuilder().build_flaky_test_triage_prompt(
+        "test_retry_payment_timeout",
+        "TimeoutError: operation exceeded 30 seconds",
+    )
+
+    assert "short stable snake_case category" in prompt.system_prompt
+    assert "no 'cluster:' prefix" in prompt.system_prompt
+    assert "reused across similar failures" in prompt.user_prompt
 
 
 def test_pr_service_marks_record_failed_when_llm_invocation_fails(db_session: Session) -> None:
@@ -730,6 +839,10 @@ def test_pull_request_workflow_enqueues_job_and_dispatches_task(db_session: Sess
     try:
         pr_service = PullRequestService(db_session)
         dispatcher = Mock()
+        dispatcher.dispatch_pull_request_analysis.return_value = AsyncDispatchResult(
+            task_id="task-pr-123",
+            backend_name="celery",
+        )
         workflow = PullRequestAnalysisWorkflowService(pr_service=pr_service, dispatcher=dispatcher)
         payload = PullRequestAnalyzeRequest(
             repo_full_name="acme/payments",
@@ -753,6 +866,10 @@ def test_pull_request_workflow_handles_github_webhook_and_dispatches_task(db_ses
     try:
         pr_service = PullRequestService(db_session)
         dispatcher = Mock()
+        dispatcher.dispatch_pull_request_analysis.return_value = AsyncDispatchResult(
+            task_id="task-pr-123",
+            backend_name="celery",
+        )
         webhook_service = GitHubWebhookService()
         raw_body = b"{}"
         pr_workflow = PullRequestAnalysisWorkflowService(
@@ -794,6 +911,10 @@ def test_flaky_test_workflow_enqueues_job_and_dispatches_task(db_session: Sessio
     try:
         flaky_service = FlakyTestService(db_session)
         dispatcher = Mock()
+        dispatcher.dispatch_flaky_test_triage.return_value = AsyncDispatchResult(
+            task_id="task-flaky-123",
+            backend_name="celery",
+        )
         workflow = FlakyTestWorkflowService(flaky_test_service=flaky_service, dispatcher=dispatcher)
         payload = FlakyTestTriageRequest(
             test_name="test_retry_payment_timeout",
@@ -876,6 +997,10 @@ def test_github_webhook_workflow_reuses_existing_record_for_same_delivery_id(
     try:
         pr_service = PullRequestService(db_session)
         dispatcher = Mock()
+        dispatcher.dispatch_pull_request_analysis.return_value = AsyncDispatchResult(
+            task_id="task-pr-123",
+            backend_name="celery",
+        )
         webhook_service = GitHubWebhookService()
         raw_body = b"{}"
         pr_workflow = PullRequestAnalysisWorkflowService(

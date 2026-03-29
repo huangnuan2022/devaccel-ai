@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./devaccel.db"
     test_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
+    async_dispatch_backend: str = "celery"
 
     llm_provider: str = "mock"
     openai_api_key: str = ""
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
 
     dynamodb_table: str = "devaccel-artifacts"
     sqs_queue_url: str = ""
+    step_functions_state_machine_arn: str = ""
     cloudwatch_log_group: str = ""
 
     model_config = SettingsConfigDict(
