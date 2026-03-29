@@ -1,4 +1,5 @@
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -73,7 +74,7 @@ class FlakyTestService:
                 self.mark_processing_failed(run.id, str(exc))
                 raise
 
-            run.cluster_key = result.cluster_key
+            run.cluster_key = self._canonicalize_cluster_key(run.test_name, result.cluster_key)
             run.suspected_root_cause = result.suspected_root_cause
             run.suggested_fix = result.suggested_fix
             run.status = "completed"
@@ -124,3 +125,29 @@ class FlakyTestService:
 
     def get_triage(self, flaky_test_id: int) -> FlakyTestRun | None:
         return self.db.get(FlakyTestRun, flaky_test_id)
+
+    def _canonicalize_cluster_key(self, test_name: str, cluster_key: str) -> str:
+        candidate = cluster_key.strip()
+        if candidate.lower().startswith("cluster:"):
+            candidate = candidate.split(":", 1)[1]
+
+        normalized = self._slugify_cluster_value(candidate)
+        if normalized in {"", "pending", "unknown", "none", "n_a", "na"}:
+            normalized = self._slugify_cluster_value(test_name)
+
+        canonical = f"cluster:{normalized}"
+        if canonical != cluster_key:
+            logger.info(
+                "Canonicalized flaky cluster key raw=%s canonical=%s test_name=%s",
+                cluster_key,
+                canonical,
+                test_name,
+            )
+        return canonical
+
+    @staticmethod
+    def _slugify_cluster_value(value: str) -> str:
+        normalized = value.lower().replace("::", "_")
+        normalized = re.sub(r"[^a-z0-9]+", "_", normalized)
+        normalized = re.sub(r"_+", "_", normalized)
+        return normalized.strip("_")

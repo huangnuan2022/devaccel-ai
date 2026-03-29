@@ -193,7 +193,32 @@ This route is the current trigger point for flaky triage. In a realistic setup, 
 (for example GitHub Actions) would call this endpoint after a failed test job and pass along the
 job metadata plus a trimmed failure log.
 
-Example GitHub Actions step shape:
+If you want to protect that ingress path, set `FLAKY_TRIAGE_INGEST_TOKEN` and have CI send:
+
+```bash
+Authorization: Bearer <your-token>
+```
+
+To keep the platform repository CI clean, the failure-forwarding logic now lives in a dedicated
+integration example:
+
+- [`examples/github-actions/flaky-triage-forwarder.yml`](examples/github-actions/flaky-triage-forwarder.yml)
+
+This keeps [`.github/workflows/ci.yml`](.github/workflows/ci.yml) focused on this repository's own
+lint/test checks, while the forwarder file shows how a user repository can POST failures into
+DevAccel-AI.
+
+The forwarder sends the payload when:
+
+- the test step fails
+- `DEVACCEL_API_URL` is configured as a GitHub Actions secret
+- `DEVACCEL_FLAKY_TRIAGE_TOKEN` is configured as a GitHub Actions secret
+
+The forwarder trims the pytest output, derives the first failed test node when possible, and POSTs
+a real triage payload to your API.
+
+If you want to use it from another repository, copy the file or convert it into a reusable workflow.
+Its core behavior is:
 
 ```yaml
 - name: Send flaky triage payload
@@ -201,6 +226,7 @@ Example GitHub Actions step shape:
   run: |
     curl -X POST "$DEVACCEL_API_URL/api/v1/flaky-tests/triage" \
       -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${{ secrets.DEVACCEL_FLAKY_TRIAGE_TOKEN }}" \
       -d @- <<'JSON'
     {
       "test_name": "test_retry_payment_timeout",
@@ -245,6 +271,7 @@ Implemented in the current MVP:
 - Worker-side GitHub PR patch retrieval path using GitHub pull request files data
 - Prompt-builder and provider boundary for LLM calls, with OpenAI wired as the first real provider option using structured outputs
 - Flaky-test triage records now accept CI metadata such as provider, workflow, job, run URL, and commit SHA so CI systems can trigger richer triage jobs
+- Flaky-test triage ingress can now be protected with an optional bearer token for CI-originated calls
 - Background jobs now persist failure status and error_message when provider/content retrieval fails
 - Provider/model/timing logs now cover LLM invocations plus key GitHub patch-fetch workflow steps
 - Automated tests across API, service, and task layers using a dedicated PostgreSQL test database

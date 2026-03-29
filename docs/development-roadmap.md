@@ -44,6 +44,7 @@ Current note:
 - Background jobs now persist `failed` state plus `error_message` when provider calls fail.
 - Minimal provider/content-fetch observability is now in place with provider/model/timing and job-state logs.
 - Flaky-test triage now accepts optional CI metadata fields (`ci_provider`, `workflow_name`, `job_name`, `run_url`, `commit_sha`) so CI systems can trigger richer triage jobs without waiting for deeper CI log ingestion.
+- Flaky-test triage ingress can now be protected with an optional bearer token, which is the first step toward safer CI-to-API triggering.
 - Bedrock remains a follow-up provider on the same abstraction.
 
 ## Phase 4: Data and Reliability

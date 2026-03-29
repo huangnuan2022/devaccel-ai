@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from app.core.config import get_settings
 from app.core.log_context import bind_log_context
 from app.db.session import get_db
 from app.schemas.flaky_test import FlakyTestTriageRequest, FlakyTestTriageResponse
@@ -70,6 +71,16 @@ def get_flaky_test_workflow_service(
         flaky_test_service=flaky_test_service,
         dispatcher=dispatcher,
     )
+
+
+def _require_flaky_triage_ingest_token(authorization: str) -> None:
+    token = get_settings().flaky_triage_ingest_token.strip()
+    if not token:
+        return
+
+    expected = f"Bearer {token}"
+    if authorization.strip() != expected:
+        raise HTTPException(status_code=401, detail="Invalid flaky triage ingest token")
 
 
 @router.get("/health")
@@ -166,8 +177,10 @@ def get_pull_request_analysis(
 @router.post("/flaky-tests/triage", response_model=FlakyTestTriageResponse, status_code=202)
 def create_flaky_test_triage(
     payload: FlakyTestTriageRequest,
+    authorization: str = Header(default=""),
     workflow: FlakyTestWorkflowService = Depends(get_flaky_test_workflow_service),
 ) -> FlakyTestTriageResponse:
+    _require_flaky_triage_ingest_token(authorization)
     try:
         run = workflow.enqueue_triage(payload)
     except TaskDispatchError as exc:

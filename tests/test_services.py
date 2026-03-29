@@ -275,6 +275,66 @@ def test_flaky_service_create_and_process_triage(db_session: Session) -> None:
         pass
 
 
+def test_flaky_service_canonicalizes_cluster_key_before_persisting(db_session: Session) -> None:
+    class DriftedClusterLLMClient:
+        provider_name = "openai"
+
+        def triage_flaky_test(self, test_name: str, failure_log: str) -> object:
+            del test_name, failure_log
+            return type(
+                "TriageResult",
+                (),
+                {
+                    "cluster_key": "Payment Retries Timeout",
+                    "suspected_root_cause": "Timeout under CI load.",
+                    "suggested_fix": "Stabilize retry timing.",
+                },
+            )()
+
+    service = FlakyTestService(db_session, llm_client=DriftedClusterLLMClient())  # type: ignore[arg-type]
+    payload = FlakyTestTriageRequest(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+    )
+
+    run = service.create_triage_job(payload)
+    processed = service.process_triage(run.id)
+
+    assert processed.cluster_key == "cluster:payment_retries_timeout"
+
+
+def test_flaky_service_falls_back_to_test_name_when_cluster_key_is_placeholder(db_session: Session) -> None:
+    class PlaceholderClusterLLMClient:
+        provider_name = "openai"
+
+        def triage_flaky_test(self, test_name: str, failure_log: str) -> object:
+            del test_name, failure_log
+            return type(
+                "TriageResult",
+                (),
+                {
+                    "cluster_key": "pending",
+                    "suspected_root_cause": "Timeout under CI load.",
+                    "suggested_fix": "Stabilize retry timing.",
+                },
+            )()
+
+    service = FlakyTestService(db_session, llm_client=PlaceholderClusterLLMClient())  # type: ignore[arg-type]
+    payload = FlakyTestTriageRequest(
+        test_name="test_retry_payment_timeout",
+        suite_name="payments.integration",
+        branch_name="main",
+        failure_log="TimeoutError: operation exceeded 30 seconds",
+    )
+
+    run = service.create_triage_job(payload)
+    processed = service.process_triage(run.id)
+
+    assert processed.cluster_key == "cluster:test_retry_payment_timeout"
+
+
 def test_pr_service_marks_record_failed_when_llm_invocation_fails(db_session: Session) -> None:
     class FailingLLMClient:
         provider_name = "openai"

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.main import app
 from app.models.flaky_test import FlakyTestRun
 from app.api.routes import get_flaky_test_workflow_service
+from app.core.config import get_settings
 from app.services.exceptions import TaskDispatchError
 
 
@@ -137,6 +138,53 @@ def test_create_flaky_test_triage_returns_422_for_invalid_payload(client: TestCl
     )
 
     assert response.status_code == 422
+
+
+def test_create_flaky_test_triage_requires_ingest_token_when_configured(client: TestClient) -> None:
+    settings = get_settings()
+    original_token = settings.flaky_triage_ingest_token
+    settings.flaky_triage_ingest_token = "triage-secret"
+
+    try:
+        response = client.post(
+            "/api/v1/flaky-tests/triage",
+            json={
+                "test_name": "test_retry_payment_timeout",
+                "suite_name": "payments.integration",
+                "branch_name": "main",
+                "failure_log": "TimeoutError: operation exceeded 30 seconds",
+            },
+        )
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid flaky triage ingest token"}
+    finally:
+        settings.flaky_triage_ingest_token = original_token
+
+
+def test_create_flaky_test_triage_accepts_valid_ingest_token(client: TestClient) -> None:
+    settings = get_settings()
+    original_token = settings.flaky_triage_ingest_token
+    settings.flaky_triage_ingest_token = "triage-secret"
+
+    try:
+        with patch("app.api.routes.TaskDispatcher.dispatch_flaky_test_triage") as dispatch_mock:
+            response = client.post(
+                "/api/v1/flaky-tests/triage",
+                headers={"Authorization": "Bearer triage-secret"},
+                json={
+                    "test_name": "test_retry_payment_timeout",
+                    "suite_name": "payments.integration",
+                    "branch_name": "main",
+                    "failure_log": "TimeoutError: operation exceeded 30 seconds",
+                },
+            )
+
+        assert response.status_code == 202
+        assert response.json()["status"] == "queued"
+        assert dispatch_mock.call_count == 1
+    finally:
+        settings.flaky_triage_ingest_token = original_token
 
 
 def test_create_flaky_test_triage_returns_503_when_dispatch_fails() -> None:

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     github_api_version: str = "2022-11-28"
     github_webhook_secret: str = ""
     github_private_key_path: str = ""
+    flaky_triage_ingest_token: str = ""
 
     dynamodb_table: str = "devaccel-artifacts"
     sqs_queue_url: str = ""

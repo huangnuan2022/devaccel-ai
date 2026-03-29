@@ -1,0 +1,95 @@
+name: Flaky Triage Forwarder
+
+on:
+  workflow_call:
+    secrets:
+      DEVACCEL_API_URL:
+        required: true
+      DEVACCEL_FLAKY_TRIAGE_TOKEN:
+        required: true
+
+jobs:
+  forward-failed-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests and capture output
+        id: pytest
+        run: |
+          set +e
+          pytest 2>&1 | tee pytest-output.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Send flaky triage payload
+        if: ${{ steps.pytest.outputs.exit_code != '0' }}
+        env:
+          DEVACCEL_API_URL: ${{ secrets.DEVACCEL_API_URL }}
+          DEVACCEL_FLAKY_TRIAGE_TOKEN: ${{ secrets.DEVACCEL_FLAKY_TRIAGE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          output = Path("pytest-output.log").read_text(encoding="utf-8", errors="replace")
+          first_failed = "pytest_failure"
+
+          failed_match = re.search(r"^FAILED\s+([^\s:]+(?:::[^\s:]+)*)", output, re.MULTILINE)
+          if failed_match:
+              first_failed = failed_match.group(1)
+          else:
+              node_match = re.search(r"([^\s:]+::[^\s:]+)\s+FAILED", output)
+              if node_match:
+                  first_failed = node_match.group(1)
+
+          payload = {
+              "test_name": first_failed,
+              "suite_name": os.environ["GITHUB_REPOSITORY"],
+              "branch_name": os.environ["GITHUB_REF_NAME"],
+              "ci_provider": "github_actions",
+              "workflow_name": os.environ["GITHUB_WORKFLOW"],
+              "job_name": os.environ["GITHUB_JOB"],
+              "run_url": (
+                  f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                  f"{os.environ['GITHUB_RUN_ID']}"
+              ),
+              "commit_sha": os.environ["GITHUB_SHA"],
+              "failure_log": output[-12000:],
+          }
+
+          Path("flaky-triage-payload.json").write_text(
+              json.dumps(payload),
+              encoding="utf-8",
+          )
+          print(f"Prepared flaky triage payload for {first_failed}")
+          PY
+
+          curl -X POST "$DEVACCEL_API_URL/api/v1/flaky-tests/triage" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $DEVACCEL_FLAKY_TRIAGE_TOKEN" \
+            --data @flaky-triage-payload.json
+
+      - name: Fail workflow when tests failed
+        if: ${{ steps.pytest.outputs.exit_code != '0' }}
+        run: exit 1
