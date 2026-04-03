@@ -116,7 +116,9 @@ def test_step_functions_dispatcher_starts_execution_with_trace_context() -> None
 
     settings = get_settings()
     original_arn = settings.step_functions_state_machine_arn
+    original_pr_arn = settings.step_functions_pr_analysis_state_machine_arn
     settings.step_functions_state_machine_arn = expected_arn
+    settings.step_functions_pr_analysis_state_machine_arn = expected_arn
 
     try:
         clear_log_context()
@@ -125,12 +127,14 @@ def test_step_functions_dispatcher_starts_execution_with_trace_context() -> None
             result = dispatcher.dispatch_pull_request_analysis(42)
     finally:
         settings.step_functions_state_machine_arn = original_arn
+        settings.step_functions_pr_analysis_state_machine_arn = original_pr_arn
         clear_log_context()
 
     assert captured["stateMachineArn"] == expected_arn
     payload = json.loads(captured["input"])
     assert payload == {
         "workflow_name": "pull_request_analysis",
+        "resource_type": "pull_request",
         "resource_id": 42,
         "trace_context": {
             "request_id": "req-123",
@@ -139,6 +143,42 @@ def test_step_functions_dispatcher_starts_execution_with_trace_context() -> None
     }
     assert result.task_id == "arn:aws:states:execution:devaccel:123"
     assert result.backend_name == "sqs_step_functions"
+
+
+def test_step_functions_dispatcher_uses_workflow_specific_state_machine_arn_for_flaky_triage() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeStepFunctionsClient:
+        def start_execution(self, **kwargs: object) -> dict[str, str]:
+            captured.update(kwargs)
+            return {"executionArn": "arn:aws:states:execution:devaccel:flaky-123"}
+
+    settings = get_settings()
+    original_arn = settings.step_functions_state_machine_arn
+    original_flaky_arn = settings.step_functions_flaky_triage_state_machine_arn
+    settings.step_functions_state_machine_arn = "arn:aws:states:generic"
+    settings.step_functions_flaky_triage_state_machine_arn = (
+        "arn:aws:states:us-east-1:123456789012:stateMachine:devaccel-flaky-triage"
+    )
+
+    try:
+        clear_log_context()
+        dispatcher = StepFunctionsDispatcher(client=FakeStepFunctionsClient(), settings=settings)
+        result = dispatcher.dispatch_flaky_test_triage(7)
+    finally:
+        settings.step_functions_state_machine_arn = original_arn
+        settings.step_functions_flaky_triage_state_machine_arn = original_flaky_arn
+        clear_log_context()
+
+    assert (
+        captured["stateMachineArn"]
+        == "arn:aws:states:us-east-1:123456789012:stateMachine:devaccel-flaky-triage"
+    )
+    payload = json.loads(captured["input"])
+    assert payload["workflow_name"] == "flaky_test_triage"
+    assert payload["resource_type"] == "flaky_test_run"
+    assert payload["resource_id"] == 7
+    assert result.task_id == "arn:aws:states:execution:devaccel:flaky-123"
 
 
 def test_get_task_dispatcher_uses_step_functions_backend_when_configured() -> None:

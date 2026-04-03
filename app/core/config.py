@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     dynamodb_table: str = "devaccel-artifacts"
     sqs_queue_url: str = ""
     step_functions_state_machine_arn: str = ""
+    step_functions_pr_analysis_state_machine_arn: str = ""
+    step_functions_flaky_triage_state_machine_arn: str = ""
     cloudwatch_log_group: str = ""
 
     model_config = SettingsConfigDict(
