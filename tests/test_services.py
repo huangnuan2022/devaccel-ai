@@ -6,12 +6,12 @@ from unittest.mock import Mock
 from sqlalchemy.orm import Session
 
 from app.api.routes import get_task_dispatcher
+from app.core.config import get_settings
+from app.core.log_context import bind_log_context, clear_log_context
 from app.models.flaky_test import FlakyTestRun
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
-from app.core.config import get_settings
 from app.schemas.flaky_test import FlakyTestTriageRequest
 from app.schemas.pull_request import PullRequestAnalyzeRequest
-from app.core.log_context import bind_log_context, clear_log_context
 from app.services.async_dispatch import AsyncDispatchResult
 from app.services.exceptions import (
     GitHubPullRequestContentError,
@@ -21,20 +21,21 @@ from app.services.exceptions import (
     TaskDispatchError,
 )
 from app.services.flaky_triage import FlakyTestService
-from app.services.github_app_auth import GitHubAppAuthService
 from app.services.github import GitHubWebhookService
+from app.services.github_app_auth import GitHubAppAuthService
 from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.llm import LLMAnalysisResult, LLMClient, OpenAILLMProvider
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
-from app.services.pr_analysis import PullRequestService, WEBHOOK_DIFF_PLACEHOLDER
+from app.services.pr_analysis import WEBHOOK_DIFF_PLACEHOLDER, PullRequestService
+from app.services.sqs_step_functions_dispatcher import SqsStepFunctionsDispatcher
 from app.services.step_functions_dispatcher import StepFunctionsDispatcher
 from app.services.task_dispatcher import TaskDispatcher
-from app.tasks.pr_analysis import analyze_pull_request_task
 from app.services.workflows import (
     FlakyTestWorkflowService,
     GitHubWebhookWorkflowService,
     PullRequestAnalysisWorkflowService,
 )
+from app.tasks.pr_analysis import analyze_pull_request_task
 
 
 def make_signature(service: GitHubWebhookService, raw_body: bytes) -> str:
@@ -48,7 +49,10 @@ class DeterministicPRLLMClient:
     def analyze_pull_request(self, diff_text: str, title: str) -> LLMAnalysisResult:
         return LLMAnalysisResult(
             summary=f"PR '{title}' changes {len(diff_text.splitlines())} diff lines.",
-            risks="Potential regression around error handling, database writes, and edge-case retries.",
+            risks=(
+                "Potential regression around error handling, database writes, "
+                "and edge-case retries."
+            ),
             suggested_tests=(
                 "1. Add success-path regression test.\n"
                 "2. Add failure-path test for invalid inputs.\n"
@@ -142,10 +146,12 @@ def test_step_functions_dispatcher_starts_execution_with_trace_context() -> None
         },
     }
     assert result.task_id == "arn:aws:states:execution:devaccel:123"
-    assert result.backend_name == "sqs_step_functions"
+    assert result.backend_name == "step_functions"
 
 
-def test_step_functions_dispatcher_uses_workflow_specific_state_machine_arn_for_flaky_triage() -> None:
+def test_step_functions_dispatcher_uses_workflow_specific_state_machine_arn_for_flaky_triage() -> (
+    None
+):
     captured: dict[str, object] = {}
 
     class FakeStepFunctionsClient:
@@ -184,7 +190,7 @@ def test_step_functions_dispatcher_uses_workflow_specific_state_machine_arn_for_
 def test_get_task_dispatcher_uses_step_functions_backend_when_configured() -> None:
     settings = get_settings()
     original_backend = settings.async_dispatch_backend
-    settings.async_dispatch_backend = "sqs_step_functions"
+    settings.async_dispatch_backend = "step_functions"
 
     try:
         dispatcher = get_task_dispatcher()
@@ -192,6 +198,67 @@ def test_get_task_dispatcher_uses_step_functions_backend_when_configured() -> No
         settings.async_dispatch_backend = original_backend
 
     assert isinstance(dispatcher, StepFunctionsDispatcher)
+
+
+def test_sqs_step_functions_dispatcher_sends_start_execution_message() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeSQSClient:
+        def send_message(self, **kwargs: object) -> dict[str, str]:
+            captured.update(kwargs)
+            return {"MessageId": "sqs-message-123"}
+
+    settings = get_settings()
+    original_queue_url = settings.sqs_queue_url
+    original_arn = settings.step_functions_pr_analysis_state_machine_arn
+    settings.sqs_queue_url = "https://sqs.us-east-1.amazonaws.com/123456789012/devaccel-analysis"
+    settings.step_functions_pr_analysis_state_machine_arn = (
+        "arn:aws:states:us-east-1:123456789012:stateMachine:devaccel-pr-analysis"
+    )
+
+    try:
+        clear_log_context()
+        dispatcher = SqsStepFunctionsDispatcher(client=FakeSQSClient(), settings=settings)
+        with bind_log_context(request_id="req-123", delivery_id="delivery-123"):
+            result = dispatcher.dispatch_pull_request_analysis(42)
+    finally:
+        settings.sqs_queue_url = original_queue_url
+        settings.step_functions_pr_analysis_state_machine_arn = original_arn
+        clear_log_context()
+
+    assert (
+        captured["QueueUrl"] == "https://sqs.us-east-1.amazonaws.com/123456789012/devaccel-analysis"
+    )
+    message = json.loads(captured["MessageBody"])
+    assert message["message_type"] == "start_step_function_execution"
+    assert (
+        message["state_machine_arn"]
+        == "arn:aws:states:us-east-1:123456789012:stateMachine:devaccel-pr-analysis"
+    )
+    assert message["execution_input"] == {
+        "workflow_name": "pull_request_analysis",
+        "resource_type": "pull_request",
+        "resource_id": 42,
+        "trace_context": {
+            "request_id": "req-123",
+            "delivery_id": "delivery-123",
+        },
+    }
+    assert result.task_id == "sqs-message-123"
+    assert result.backend_name == "sqs_step_functions"
+
+
+def test_get_task_dispatcher_uses_sqs_step_functions_backend_when_configured() -> None:
+    settings = get_settings()
+    original_backend = settings.async_dispatch_backend
+    settings.async_dispatch_backend = "sqs_step_functions"
+
+    try:
+        dispatcher = get_task_dispatcher()
+    finally:
+        settings.async_dispatch_backend = original_backend
+
+    assert isinstance(dispatcher, SqsStepFunctionsDispatcher)
 
 
 def test_pr_service_create_and_process_analysis(db_session: Session) -> None:
@@ -400,7 +467,9 @@ def test_flaky_service_canonicalizes_cluster_key_before_persisting(db_session: S
     assert processed.cluster_key == "cluster:payment_retries_timeout"
 
 
-def test_flaky_service_falls_back_to_test_name_when_cluster_key_is_placeholder(db_session: Session) -> None:
+def test_flaky_service_falls_back_to_test_name_when_cluster_key_is_placeholder(
+    db_session: Session,
+) -> None:
     class PlaceholderClusterLLMClient:
         provider_name = "openai"
 
@@ -588,7 +657,9 @@ def test_github_pr_content_service_builds_patch_bundle_from_file_patches() -> No
     assert "assets/logo.png" not in bundle
 
 
-def test_github_pr_content_service_uses_installation_token_when_installation_id_is_present() -> None:
+def test_github_pr_content_service_uses_installation_token_when_installation_id_is_present() -> (
+    None
+):
     class FakeResponse:
         def __init__(self, status_code: int, payload: object) -> None:
             self.status_code = status_code
@@ -681,7 +752,9 @@ def test_llm_client_rejects_provider_names_that_are_not_wired_yet() -> None:
     except LLMProviderConfigurationError as exc:
         assert "not wired yet" in str(exc)
     else:
-        raise AssertionError("Expected LLMProviderConfigurationError for bedrock provider selection")
+        raise AssertionError(
+            "Expected LLMProviderConfigurationError for bedrock provider selection"
+        )
 
 
 def test_openai_provider_parses_pull_request_analysis_json() -> None:
@@ -722,7 +795,9 @@ def test_openai_provider_parses_pull_request_analysis_json() -> None:
     assert fake_client.responses.last_kwargs["model"] == "gpt-4o-mini"
     assert fake_client.responses.last_kwargs["instructions"] == "system"
     assert fake_client.responses.last_kwargs["input"] == "user"
-    assert fake_client.responses.last_kwargs["text_format"].__name__ == "_PullRequestAnalysisPayload"
+    assert (
+        fake_client.responses.last_kwargs["text_format"].__name__ == "_PullRequestAnalysisPayload"
+    )
     assert result.summary == "summary text"
     assert result.risks == "risk text"
     assert result.suggested_tests == "1. test"
@@ -902,7 +977,9 @@ def test_pull_request_workflow_enqueues_job_and_dispatches_task(db_session: Sess
         pass
 
 
-def test_pull_request_workflow_handles_github_webhook_and_dispatches_task(db_session: Session) -> None:
+def test_pull_request_workflow_handles_github_webhook_and_dispatches_task(
+    db_session: Session,
+) -> None:
     try:
         pr_service = PullRequestService(db_session)
         dispatcher = Mock()

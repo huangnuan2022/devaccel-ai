@@ -37,6 +37,36 @@ GitHub Webhook
   -> Post back to GitHub comments or checks
 ```
 
+### AWS Step Functions Target Shape
+
+The local MVP still runs with Celery by default, but the async dispatch boundary now supports
+two cloud-oriented paths:
+
+1. `ASYNC_DISPATCH_BACKEND=step_functions`
+   - FastAPI starts a Step Functions execution directly.
+2. `ASYNC_DISPATCH_BACKEND=sqs_step_functions`
+   - FastAPI sends a start-execution message to SQS.
+   - A lightweight Lambda consumer can read that message and start the corresponding state machine.
+
+The shared execution input contract is:
+
+```json
+{
+  "workflow_name": "pull_request_analysis",
+  "resource_type": "pull_request",
+  "resource_id": 42,
+  "trace_context": {
+    "request_id": "req-123",
+    "delivery_id": "delivery-123"
+  }
+}
+```
+
+State machine blueprints live in:
+
+- `infra/step-functions/pull-request-analysis.asl.json`
+- `infra/step-functions/flaky-test-triage.asl.json`
+
 ### Flaky-Test Triage
 
 ```text

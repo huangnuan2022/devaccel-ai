@@ -35,7 +35,8 @@ class PullRequestAnalysisWorkflowService:
                 ) from exc
             with bind_log_context(task_id=dispatch_result.task_id, pull_request_id=record.id):
                 logger.info(
-                    "Dispatched pull request analysis task pull_request_id=%s task_id=%s backend=%s",
+                    "Dispatched pull request analysis task pull_request_id=%s "
+                    "task_id=%s backend=%s",
                     record.id,
                     dispatch_result.task_id,
                     dispatch_result.backend_name,
@@ -84,7 +85,9 @@ class GitHubWebhookWorkflowService:
 
 
 class FlakyTestWorkflowService:
-    def __init__(self, flaky_test_service: FlakyTestService, dispatcher: AsyncWorkflowDispatcher) -> None:
+    def __init__(
+        self, flaky_test_service: FlakyTestService, dispatcher: AsyncWorkflowDispatcher
+    ) -> None:
         self.flaky_test_service = flaky_test_service
         self.dispatcher = dispatcher
 
@@ -94,7 +97,9 @@ class FlakyTestWorkflowService:
             dispatch_result = self.dispatcher.dispatch_flaky_test_triage(run.id)
         except Exception as exc:
             self.flaky_test_service.mark_dispatch_failed(run.id, str(exc))
-            raise TaskDispatchError(f"Failed to dispatch flaky test triage for run {run.id}") from exc
+            raise TaskDispatchError(
+                f"Failed to dispatch flaky test triage for run {run.id}"
+            ) from exc
         with bind_log_context(task_id=dispatch_result.task_id, flaky_test_id=run.id):
             logger.info(
                 "Dispatched flaky triage task flaky_test_id=%s task_id=%s backend=%s",

@@ -77,6 +77,8 @@ Current note:
 - Workflow services now depend on a generic async dispatch boundary instead of only a Celery-specific return shape.
 - The current `TaskDispatcher` is explicitly the Celery adapter for that boundary, which keeps the local MVP intact while making the next SQS / Step Functions adapter additive instead of disruptive.
 - Step Functions dispatch now has a structured execution input contract (`workflow_name`, `resource_type`, `resource_id`, `trace_context`) and can target workflow-specific state machine ARNs for PR analysis vs. flaky triage.
+- The cloud dispatch path is now split explicitly: `step_functions` starts executions directly, while `sqs_step_functions` sends a start-execution message to SQS for a future Lambda consumer.
+- Initial ASL blueprints exist under `infra/step-functions/` for PR analysis and flaky-test triage.
 
 ## Phase 6: Production Readiness
 

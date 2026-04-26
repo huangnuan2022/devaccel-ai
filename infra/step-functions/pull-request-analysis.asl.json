@@ -1,0 +1,66 @@
+{
+  "Comment": "DevAccel-AI pull request analysis workflow blueprint. Lambda ARNs are placeholders until infrastructure provisioning is added.",
+  "StartAt": "FetchGitHubPatch",
+  "States": {
+    "FetchGitHubPatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${FetchGitHubPatchFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.patch_fetch",
+      "Next": "ChunkPatch"
+    },
+    "ChunkPatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ChunkPatchFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.patch_chunks",
+      "Next": "AnalyzeChunks"
+    },
+    "AnalyzeChunks": {
+      "Type": "Map",
+      "ItemsPath": "$.patch_chunks.Payload.chunks",
+      "MaxConcurrency": 10,
+      "ResultPath": "$.chunk_analyses",
+      "Iterator": {
+        "StartAt": "AnalyzePatchChunk",
+        "States": {
+          "AnalyzePatchChunk": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${AnalyzePatchChunkFunctionArn}",
+              "Payload.$": "$"
+            },
+            "End": true
+          }
+        }
+      },
+      "Next": "AggregateAnalysis"
+    },
+    "AggregateAnalysis": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AggregatePRAnalysisFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.analysis",
+      "Next": "PersistAnalysis"
+    },
+    "PersistAnalysis": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${PersistPRAnalysisFunctionArn}",
+        "Payload.$": "$"
+      },
+      "End": true
+    }
+  }
+}

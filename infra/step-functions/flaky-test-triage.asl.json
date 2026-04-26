@@ -1,0 +1,55 @@
+{
+  "Comment": "DevAccel-AI flaky-test triage workflow blueprint. Lambda ARNs are placeholders until infrastructure provisioning is added.",
+  "StartAt": "LoadFailureContext",
+  "States": {
+    "LoadFailureContext": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${LoadFailureContextFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.failure_context",
+      "Next": "FindHistoricalClusters"
+    },
+    "FindHistoricalClusters": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${FindHistoricalClustersFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.historical_clusters",
+      "Next": "TriageWithLLM"
+    },
+    "TriageWithLLM": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${TriageWithLLMFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.triage",
+      "Next": "ResolveCanonicalCluster"
+    },
+    "ResolveCanonicalCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ResolveCanonicalClusterFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.canonical_cluster",
+      "Next": "PersistTriage"
+    },
+    "PersistTriage": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${PersistFlakyTriageFunctionArn}",
+        "Payload.$": "$"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,6 +1,9 @@
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from sqlalchemy.orm import Session
+
 from app.core.config import get_settings
 from app.core.log_context import bind_log_context
 from app.db.session import get_db
@@ -15,6 +18,7 @@ from app.services.exceptions import (
 from app.services.flaky_triage import FlakyTestService
 from app.services.github import GitHubWebhookService
 from app.services.pr_analysis import PullRequestService
+from app.services.sqs_step_functions_dispatcher import SqsStepFunctionsDispatcher
 from app.services.step_functions_dispatcher import StepFunctionsDispatcher
 from app.services.task_dispatcher import TaskDispatcher
 from app.services.workflows import (
@@ -35,22 +39,24 @@ def get_task_dispatcher() -> AsyncWorkflowDispatcher:
     backend = get_settings().async_dispatch_backend.strip().lower()
     if backend == "celery":
         return TaskDispatcher()
-    if backend in {"sqs_step_functions", "step_functions"}:
+    if backend == "step_functions":
         return StepFunctionsDispatcher()
+    if backend == "sqs_step_functions":
+        return SqsStepFunctionsDispatcher()
     raise RuntimeError(f"Unsupported async_dispatch_backend: {backend}")
 
 
-def get_pull_request_service(db=Depends(get_db)) -> PullRequestService:
+def get_pull_request_service(db: Annotated[Session, Depends(get_db)]) -> PullRequestService:
     return PullRequestService(db)
 
 
-def get_flaky_test_service(db=Depends(get_db)) -> FlakyTestService:
+def get_flaky_test_service(db: Annotated[Session, Depends(get_db)]) -> FlakyTestService:
     return FlakyTestService(db)
 
 
 def get_pull_request_analysis_workflow_service(
-    pr_service: PullRequestService = Depends(get_pull_request_service),
-    dispatcher: AsyncWorkflowDispatcher = Depends(get_task_dispatcher),
+    pr_service: Annotated[PullRequestService, Depends(get_pull_request_service)],
+    dispatcher: Annotated[AsyncWorkflowDispatcher, Depends(get_task_dispatcher)],
 ) -> PullRequestAnalysisWorkflowService:
     return PullRequestAnalysisWorkflowService(
         pr_service=pr_service,
@@ -59,10 +65,11 @@ def get_pull_request_analysis_workflow_service(
 
 
 def get_github_webhook_workflow_service(
-    webhook_service: GitHubWebhookService = Depends(get_github_webhook_service),
-    pr_workflow: PullRequestAnalysisWorkflowService = Depends(
-        get_pull_request_analysis_workflow_service
-    ),
+    webhook_service: Annotated[GitHubWebhookService, Depends(get_github_webhook_service)],
+    pr_workflow: Annotated[
+        PullRequestAnalysisWorkflowService,
+        Depends(get_pull_request_analysis_workflow_service),
+    ],
 ) -> GitHubWebhookWorkflowService:
     return GitHubWebhookWorkflowService(
         github_webhook_service=webhook_service,
@@ -71,8 +78,8 @@ def get_github_webhook_workflow_service(
 
 
 def get_flaky_test_workflow_service(
-    flaky_test_service: FlakyTestService = Depends(get_flaky_test_service),
-    dispatcher: AsyncWorkflowDispatcher = Depends(get_task_dispatcher),
+    flaky_test_service: Annotated[FlakyTestService, Depends(get_flaky_test_service)],
+    dispatcher: Annotated[AsyncWorkflowDispatcher, Depends(get_task_dispatcher)],
 ) -> FlakyTestWorkflowService:
     return FlakyTestWorkflowService(
         flaky_test_service=flaky_test_service,
@@ -98,10 +105,13 @@ def healthcheck() -> dict[str, str]:
 @router.post("/webhooks/github", status_code=202)
 async def github_webhook(
     request: Request,
-    x_github_event: str = Header(default=""),
-    x_hub_signature_256: str = Header(default=""),
-    x_github_delivery: str = Header(default=""),
-    workflow: GitHubWebhookWorkflowService = Depends(get_github_webhook_workflow_service),
+    workflow: Annotated[
+        GitHubWebhookWorkflowService,
+        Depends(get_github_webhook_workflow_service),
+    ],
+    x_github_event: Annotated[str, Header()] = "",
+    x_hub_signature_256: Annotated[str, Header()] = "",
+    x_github_delivery: Annotated[str, Header()] = "",
 ) -> dict[str, str | int]:
     raw_body = await request.body()
     payload = await request.json()
@@ -132,7 +142,10 @@ async def github_webhook(
 @router.post("/pull-requests/analyze", response_model=PullRequestAnalysisResponse, status_code=202)
 def create_pull_request_analysis(
     payload: PullRequestAnalyzeRequest,
-    workflow: PullRequestAnalysisWorkflowService = Depends(get_pull_request_analysis_workflow_service),
+    workflow: Annotated[
+        PullRequestAnalysisWorkflowService,
+        Depends(get_pull_request_analysis_workflow_service),
+    ],
 ) -> PullRequestAnalysisResponse:
     try:
         record = workflow.enqueue_analysis(payload)
@@ -159,7 +172,7 @@ def create_pull_request_analysis(
 @router.get("/pull-requests/{pull_request_id}", response_model=PullRequestAnalysisResponse)
 def get_pull_request_analysis(
     pull_request_id: int,
-    service: PullRequestService = Depends(get_pull_request_service),
+    service: Annotated[PullRequestService, Depends(get_pull_request_service)],
 ) -> PullRequestAnalysisResponse:
     record = service.get_analysis(pull_request_id)
     if record is None:
@@ -184,8 +197,11 @@ def get_pull_request_analysis(
 @router.post("/flaky-tests/triage", response_model=FlakyTestTriageResponse, status_code=202)
 def create_flaky_test_triage(
     payload: FlakyTestTriageRequest,
-    authorization: str = Header(default=""),
-    workflow: FlakyTestWorkflowService = Depends(get_flaky_test_workflow_service),
+    workflow: Annotated[
+        FlakyTestWorkflowService,
+        Depends(get_flaky_test_workflow_service),
+    ],
+    authorization: Annotated[str, Header()] = "",
 ) -> FlakyTestTriageResponse:
     _require_flaky_triage_ingest_token(authorization)
     try:
@@ -203,7 +219,7 @@ def create_flaky_test_triage(
 @router.get("/flaky-tests/{flaky_test_id}", response_model=FlakyTestTriageResponse)
 def get_flaky_test_triage(
     flaky_test_id: int,
-    service: FlakyTestService = Depends(get_flaky_test_service),
+    service: Annotated[FlakyTestService, Depends(get_flaky_test_service)],
 ) -> FlakyTestTriageResponse:
     run = service.get_triage(flaky_test_id)
     if run is None:

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -6,3 +8,9 @@ class StepFunctionsExecutionInput(BaseModel):
     resource_type: str = Field(..., examples=["pull_request"])
     resource_id: int = Field(..., examples=[42])
     trace_context: dict[str, str] = Field(default_factory=dict)
+
+
+class SqsStepFunctionsDispatchMessage(BaseModel):
+    message_type: Literal["start_step_function_execution"] = "start_step_function_execution"
+    state_machine_arn: str
+    execution_input: StepFunctionsExecutionInput

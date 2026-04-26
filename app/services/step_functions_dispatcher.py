@@ -9,7 +9,7 @@ from app.services.async_dispatch import AsyncDispatchResult
 
 
 class StepFunctionsDispatcher:
-    backend_name = "sqs_step_functions"
+    backend_name = "step_functions"
 
     def __init__(self, client: Any | None = None, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -40,14 +40,13 @@ class StepFunctionsDispatcher:
         if not state_machine_arn:
             raise RuntimeError(
                 f"A Step Functions state machine ARN is required for workflow '{workflow_name}' "
-                "when async_dispatch_backend=sqs_step_functions"
+                "when async_dispatch_backend=step_functions"
             )
 
-        payload = StepFunctionsExecutionInput(
+        payload = build_step_functions_execution_input(
             workflow_name=workflow_name,
             resource_type=resource_type,
             resource_id=resource_id,
-            trace_context=get_serialized_log_context(),
         )
         response = self.client.start_execution(
             stateMachineArn=state_machine_arn,
@@ -59,14 +58,29 @@ class StepFunctionsDispatcher:
         )
 
     def _resolve_state_machine_arn(self, workflow_name: str) -> str:
-        if workflow_name == "pull_request_analysis":
-            return (
-                self.settings.step_functions_pr_analysis_state_machine_arn.strip()
-                or self.settings.step_functions_state_machine_arn.strip()
-            )
-        if workflow_name == "flaky_test_triage":
-            return (
-                self.settings.step_functions_flaky_triage_state_machine_arn.strip()
-                or self.settings.step_functions_state_machine_arn.strip()
-            )
-        return self.settings.step_functions_state_machine_arn.strip()
+        return resolve_state_machine_arn(self.settings, workflow_name)
+
+
+def build_step_functions_execution_input(
+    *, workflow_name: str, resource_type: str, resource_id: int
+) -> StepFunctionsExecutionInput:
+    return StepFunctionsExecutionInput(
+        workflow_name=workflow_name,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        trace_context=get_serialized_log_context(),
+    )
+
+
+def resolve_state_machine_arn(settings: Settings, workflow_name: str) -> str:
+    if workflow_name == "pull_request_analysis":
+        return (
+            settings.step_functions_pr_analysis_state_machine_arn.strip()
+            or settings.step_functions_state_machine_arn.strip()
+        )
+    if workflow_name == "flaky_test_triage":
+        return (
+            settings.step_functions_flaky_triage_state_machine_arn.strip()
+            or settings.step_functions_state_machine_arn.strip()
+        )
+    return settings.step_functions_state_machine_arn.strip()

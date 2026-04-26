@@ -1,5 +1,5 @@
-from app.services.async_dispatch import AsyncDispatchResult
 from app.core.log_context import get_serialized_log_context
+from app.services.async_dispatch import AsyncDispatchResult
 from app.tasks.flaky_triage import triage_flaky_test_task
 from app.tasks.pr_analysis import analyze_pull_request_task
 
