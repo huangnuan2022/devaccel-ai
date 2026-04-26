@@ -6,7 +6,6 @@ from app.core.config import get_settings
 from app.services.exceptions import GitHubPullRequestContentError
 from app.services.github_app_auth import GitHubAppAuthService
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +28,13 @@ class GitHubPullRequestContentService:
         owner, repo = self._parse_repo_full_name(repo_full_name)
         files: list[dict] = []
         page = 1
-        auth_mode = "installation" if installation_id is not None else "token" if self.settings.github_token else "anonymous"
+        auth_mode = (
+            "installation"
+            if installation_id is not None
+            else "token"
+            if self.settings.github_token
+            else "anonymous"
+        )
 
         logger.info(
             "Fetching GitHub pull request patch bundle repo=%s pr_number=%s auth_mode=%s",
@@ -46,7 +51,8 @@ class GitHubPullRequestContentService:
             )
             if response.status_code >= 400:
                 logger.warning(
-                    "GitHub pull request files request failed repo=%s pr_number=%s page=%s status_code=%s",
+                    "GitHub pull request files request failed repo=%s pr_number=%s "
+                    "page=%s status_code=%s",
                     repo_full_name,
                     pr_number,
                     page,
@@ -94,7 +100,8 @@ class GitHubPullRequestContentService:
             )
 
         logger.info(
-            "Fetched GitHub pull request patch bundle repo=%s pr_number=%s files=%s patch_sections=%s",
+            "Fetched GitHub pull request patch bundle repo=%s pr_number=%s "
+            "files=%s patch_sections=%s",
             repo_full_name,
             pr_number,
             len(files),

@@ -10,7 +10,9 @@ class FlakyTestTriageRequest(BaseModel):
     ci_provider: str | None = Field(default=None, examples=["github_actions"])
     workflow_name: str | None = Field(default=None, examples=["CI"])
     job_name: str | None = Field(default=None, examples=["pytest"])
-    run_url: str | None = Field(default=None, examples=["https://github.com/acme/payments/actions/runs/123"])
+    run_url: str | None = Field(
+        default=None, examples=["https://github.com/acme/payments/actions/runs/123"]
+    )
     commit_sha: str | None = Field(default=None, examples=["abc123def456"])
     failure_log: str = Field(..., description="Raw CI failure log")
 

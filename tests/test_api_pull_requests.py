@@ -3,9 +3,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.api.routes import get_pull_request_analysis_workflow_service
 from app.main import app
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
-from app.api.routes import get_pull_request_analysis_workflow_service
 from app.services.exceptions import TaskDispatchError
 
 

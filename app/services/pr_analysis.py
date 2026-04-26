@@ -13,7 +13,6 @@ from app.services.exceptions import (
 from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.llm import LLMClient
 
-
 WEBHOOK_DIFF_PLACEHOLDER = (
     "GitHub webhook payload does not include unified diff text. Fetch from GitHub API."
 )
@@ -95,7 +94,8 @@ class PullRequestService:
                 diff_text = record.diff_text
                 if diff_text == WEBHOOK_DIFF_PLACEHOLDER:
                     logger.info(
-                        "Pull request analysis requires GitHub patch fetch id=%s repo=%s pr_number=%s",
+                        "Pull request analysis requires GitHub patch fetch id=%s "
+                        "repo=%s pr_number=%s",
                         record.id,
                         record.repo_full_name,
                         record.pr_number,

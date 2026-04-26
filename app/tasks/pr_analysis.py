@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.core.log_context import bind_log_context, clear_log_context
 from app.db.session import SessionLocal
 from app.services.pr_analysis import PullRequestService
@@ -5,7 +7,7 @@ from app.workers.celery_app import celery_app
 
 
 @celery_app.task(name="pr.analyze", bind=True)
-def analyze_pull_request_task(self, pull_request_id: int) -> None:
+def analyze_pull_request_task(self: Any, pull_request_id: int) -> None:
     db = SessionLocal()
     try:
         headers = getattr(self.request, "headers", {}) or {}

@@ -7,9 +7,9 @@ Create Date: 2026-03-19 00:00:00.000000
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "20260319_0001"
 down_revision: Union[str, Sequence[str], None] = None
@@ -49,13 +49,19 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("''"),
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         # Note: update-time refresh currently lives in the ORM via onupdate=func.now().
         # If we later need DB-enforced updated_at semantics, add a dedicated migration.
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_flaky_test_runs_id", "flaky_test_runs", ["id"], unique=False)
-    op.create_index("ix_flaky_test_runs_suite_name", "flaky_test_runs", ["suite_name"], unique=False)
+    op.create_index(
+        "ix_flaky_test_runs_suite_name", "flaky_test_runs", ["suite_name"], unique=False
+    )
     op.create_index("ix_flaky_test_runs_test_name", "flaky_test_runs", ["test_name"], unique=False)
 
     op.create_table(
@@ -74,21 +80,31 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'queued'"),
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         # Note: update-time refresh currently lives in the ORM via onupdate=func.now().
         # If we later need DB-enforced updated_at semantics, add a dedicated migration.
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_pull_requests_delivery_id", "pull_requests", ["delivery_id"], unique=True)
     op.create_index("ix_pull_requests_id", "pull_requests", ["id"], unique=False)
-    op.create_index("ix_pull_requests_installation_id", "pull_requests", ["installation_id"], unique=False)
+    op.create_index(
+        "ix_pull_requests_installation_id", "pull_requests", ["installation_id"], unique=False
+    )
     op.create_index("ix_pull_requests_pr_number", "pull_requests", ["pr_number"], unique=False)
-    op.create_index("ix_pull_requests_repo_full_name", "pull_requests", ["repo_full_name"], unique=False)
+    op.create_index(
+        "ix_pull_requests_repo_full_name", "pull_requests", ["repo_full_name"], unique=False
+    )
 
     op.create_table(
         "pull_request_analyses",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("pull_request_id", sa.Integer(), sa.ForeignKey("pull_requests.id"), nullable=False),
+        sa.Column(
+            "pull_request_id", sa.Integer(), sa.ForeignKey("pull_requests.id"), nullable=False
+        ),
         sa.Column("summary", sa.Text(), nullable=False),
         sa.Column("risks", sa.Text(), nullable=False),
         sa.Column("suggested_tests", sa.Text(), nullable=False),
@@ -98,7 +114,9 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'mock'"),
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_pull_request_analyses_id", "pull_request_analyses", ["id"], unique=False)
     op.create_index(

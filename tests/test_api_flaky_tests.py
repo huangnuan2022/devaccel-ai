@@ -3,10 +3,10 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.main import app
-from app.models.flaky_test import FlakyTestRun
 from app.api.routes import get_flaky_test_workflow_service
 from app.core.config import get_settings
+from app.main import app
+from app.models.flaky_test import FlakyTestRun
 from app.services.exceptions import TaskDispatchError
 
 

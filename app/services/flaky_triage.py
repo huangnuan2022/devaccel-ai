@@ -12,7 +12,6 @@ from app.services.exceptions import (
 )
 from app.services.llm import LLMClient
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +38,8 @@ class FlakyTestService:
         self.db.refresh(run)
         with bind_log_context(flaky_test_id=run.id):
             logger.info(
-                "Created flaky triage job id=%s test_name=%s branch=%s ci_provider=%s workflow_name=%s job_name=%s",
+                "Created flaky triage job id=%s test_name=%s branch=%s "
+                "ci_provider=%s workflow_name=%s job_name=%s",
                 run.id,
                 run.test_name,
                 run.branch_name,
@@ -93,7 +93,9 @@ class FlakyTestService:
             )
             return run
 
-    def mark_dispatch_failed(self, flaky_test_id: int, error_message: str | None = None) -> FlakyTestRun:
+    def mark_dispatch_failed(
+        self, flaky_test_id: int, error_message: str | None = None
+    ) -> FlakyTestRun:
         run = self.db.get(FlakyTestRun, flaky_test_id)
         if run is None:
             raise ValueError(f"Flaky test run {flaky_test_id} not found")
@@ -139,7 +141,8 @@ class FlakyTestService:
         )
         if historical_match is not None and historical_match != canonical:
             logger.info(
-                "Reused historical flaky cluster key candidate=%s canonical=%s suite_name=%s test_name=%s",
+                "Reused historical flaky cluster key candidate=%s canonical=%s "
+                "suite_name=%s test_name=%s",
                 canonical,
                 historical_match,
                 suite_name,

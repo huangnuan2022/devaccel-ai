@@ -1,7 +1,7 @@
 import logging
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import BaseModel
@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.services.exceptions import LLMProviderConfigurationError, LLMProviderInvocationError
 from app.services.llm_prompts import LLMPromptBuilder, PromptSet
-
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,9 @@ class MockLLMProvider:
     ) -> LLMAnalysisResult:
         del prompt
         summary = f"PR '{title}' changes {max(1, len(diff_text.splitlines()))} diff lines."
-        risks = "Potential regression around error handling, database writes, and edge-case retries."
+        risks = (
+            "Potential regression around error handling, database writes, and edge-case retries."
+        )
         suggested_tests = (
             "1. Add success-path regression test.\n"
             "2. Add failure-path test for invalid inputs.\n"
@@ -75,15 +76,18 @@ class MockLLMProvider:
         normalized = test_name.lower().replace("::", ".").replace(" ", "-")
         cluster_key = f"cluster:{normalized}"
         suspected_root_cause = (
-            "Likely timing-sensitive assertion or shared mutable fixture causing non-deterministic state."
+            "Likely timing-sensitive assertion or shared mutable fixture causing "
+            "non-deterministic state."
         )
         suggested_fix = (
-            "Isolate shared fixtures, freeze time-dependent assertions, and add deterministic retries "
-            "only after root cause is confirmed."
+            "Isolate shared fixtures, freeze time-dependent assertions, and add "
+            "deterministic retries only after root cause is confirmed."
         )
         if "timeout" in failure_log.lower():
             suspected_root_cause = "Likely environment-dependent timeout under concurrent CI load."
-            suggested_fix = "Raise explicit wait condition, remove sleep-based checks, and instrument retries."
+            suggested_fix = (
+                "Raise explicit wait condition, remove sleep-based checks, and instrument retries."
+            )
         return FlakyTriageResult(
             cluster_key=cluster_key,
             suspected_root_cause=suspected_root_cause,
@@ -112,7 +116,10 @@ class OpenAILLMProvider:
         del diff_text, title
         started_at = time.perf_counter()
         try:
-            payload = self._generate_structured_output(prompt, _PullRequestAnalysisPayload)
+            payload = cast(
+                _PullRequestAnalysisPayload,
+                self._generate_structured_output(prompt, _PullRequestAnalysisPayload),
+            )
             result = LLMAnalysisResult(
                 summary=payload.summary,
                 risks=payload.risks,
@@ -139,7 +146,10 @@ class OpenAILLMProvider:
         del test_name, failure_log
         started_at = time.perf_counter()
         try:
-            payload = self._generate_structured_output(prompt, _FlakyTriagePayload)
+            payload = cast(
+                _FlakyTriagePayload,
+                self._generate_structured_output(prompt, _FlakyTriagePayload),
+            )
             result = FlakyTriageResult(
                 cluster_key=payload.cluster_key,
                 suspected_root_cause=payload.suspected_root_cause,
@@ -198,7 +208,9 @@ class LLMClient:
     ) -> None:
         self.settings = get_settings()
         self.prompt_builder = prompt_builder or LLMPromptBuilder()
-        self.provider = provider or self._build_provider(provider_name or self.settings.llm_provider)
+        self.provider = provider or self._build_provider(
+            provider_name or self.settings.llm_provider
+        )
 
     @property
     def provider_name(self) -> str:
@@ -226,7 +238,7 @@ class LLMClient:
             return OpenAILLMProvider()
         if normalized == "bedrock":
             raise LLMProviderConfigurationError(
-                "LLM provider 'bedrock' is not wired yet. Keep llm_provider=mock or openai until the "
-                "Bedrock integration is implemented."
+                "LLM provider 'bedrock' is not wired yet. Keep llm_provider=mock "
+                "or openai until the Bedrock integration is implemented."
             )
         raise LLMProviderConfigurationError(f"Unsupported llm_provider: {provider_name}")

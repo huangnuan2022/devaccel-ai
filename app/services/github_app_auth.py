@@ -5,11 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.core.config import get_settings
 from app.services.exceptions import GitHubPullRequestContentError
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +26,10 @@ class GitHubAppAuthService:
     def get_installation_access_token(self, installation_id: int) -> str:
         cached = self._token_cache.get(installation_id)
         if cached is not None:
-            token, expires_at = cached
-            if expires_at is None or expires_at > datetime.now(timezone.utc) + timedelta(minutes=1):
+            token, cached_expires_at = cached
+            if cached_expires_at is None or cached_expires_at > datetime.now(
+                timezone.utc
+            ) + timedelta(minutes=1):
                 return token
 
         jwt_token = self._create_app_jwt()
@@ -51,7 +52,8 @@ class GitHubAppAuthService:
         expires_at_raw = payload.get("expires_at")
         if not isinstance(token, str) or not token:
             raise GitHubPullRequestContentError(
-                f"GitHub installation token response did not contain a token for installation {installation_id}"
+                "GitHub installation token response did not contain a token "
+                f"for installation {installation_id}"
             )
 
         expires_at: datetime | None = None
@@ -102,6 +104,10 @@ class GitHubAppAuthService:
             raise GitHubPullRequestContentError(
                 f"GitHub App private key file is invalid: {private_key_path}"
             ) from exc
+        if not isinstance(private_key, rsa.RSAPrivateKey):
+            raise GitHubPullRequestContentError(
+                f"GitHub App private key file must contain an RSA key: {private_key_path}"
+            )
         signature = private_key.sign(
             signing_input.encode("ascii"),
             padding.PKCS1v15(),

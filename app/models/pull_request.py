@@ -10,7 +10,9 @@ class PullRequestRecord(Base):
     __tablename__ = "pull_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    delivery_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    delivery_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
     installation_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     repo_full_name: Mapped[str] = mapped_column(String(255), index=True)
     pr_number: Mapped[int] = mapped_column(Integer, index=True)

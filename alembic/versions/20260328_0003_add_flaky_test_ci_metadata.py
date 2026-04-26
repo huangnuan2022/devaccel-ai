@@ -7,9 +7,9 @@ Create Date: 2026-03-28 00:00:00.000000
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "20260328_0003"
 down_revision: Union[str, Sequence[str], None] = "20260320_0002"
@@ -19,7 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column("flaky_test_runs", sa.Column("ci_provider", sa.String(length=120), nullable=True))
-    op.add_column("flaky_test_runs", sa.Column("workflow_name", sa.String(length=255), nullable=True))
+    op.add_column(
+        "flaky_test_runs", sa.Column("workflow_name", sa.String(length=255), nullable=True)
+    )
     op.add_column("flaky_test_runs", sa.Column("job_name", sa.String(length=255), nullable=True))
     op.add_column("flaky_test_runs", sa.Column("run_url", sa.Text(), nullable=True))
     op.add_column("flaky_test_runs", sa.Column("commit_sha", sa.String(length=64), nullable=True))

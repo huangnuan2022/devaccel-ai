@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.core.log_context import bind_log_context, clear_log_context
 from app.db.session import SessionLocal
 from app.services.flaky_triage import FlakyTestService
@@ -5,7 +7,7 @@ from app.workers.celery_app import celery_app
 
 
 @celery_app.task(name="flaky.triage", bind=True)
-def triage_flaky_test_task(self, flaky_test_id: int) -> None:
+def triage_flaky_test_task(self: Any, flaky_test_id: int) -> None:
     db = SessionLocal()
     try:
         headers = getattr(self.request, "headers", {}) or {}

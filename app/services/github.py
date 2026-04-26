@@ -46,9 +46,9 @@ class GitHubWebhookService:
         if not secret:
             return
 
-        expected = "sha256=" + hmac.new(
-            secret.encode("utf-8"), raw_body, hashlib.sha256
-        ).hexdigest()
+        expected = (
+            "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+        )
         if not hmac.compare_digest(expected, signature):
             raise InvalidWebhookSignatureError("Invalid GitHub webhook signature")
 

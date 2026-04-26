@@ -1,8 +1,7 @@
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-import uuid
-
 
 LOG_CONTEXT_FIELDS = (
     "request_id",
@@ -13,7 +12,11 @@ LOG_CONTEXT_FIELDS = (
     "installation_id",
 )
 
-_log_context: ContextVar[dict[str, str]] = ContextVar("log_context", default={})
+_log_context: ContextVar[dict[str, str] | None] = ContextVar("log_context", default=None)
+
+
+def _current_log_context() -> dict[str, str]:
+    return _log_context.get() or {}
 
 
 def ensure_request_id(request_id: str | None = None) -> str:
@@ -27,17 +30,17 @@ def clear_log_context() -> None:
 
 
 def get_log_record_context() -> dict[str, str]:
-    current = _log_context.get()
+    current = _current_log_context()
     return {field: current.get(field, "-") for field in LOG_CONTEXT_FIELDS}
 
 
 def get_serialized_log_context() -> dict[str, str]:
-    return {key: value for key, value in _log_context.get().items() if value}
+    return {key: value for key, value in _current_log_context().items() if value}
 
 
 @contextmanager
 def bind_log_context(**context: object) -> Iterator[None]:
-    current = dict(_log_context.get())
+    current = dict(_current_log_context())
     updates = {
         key: str(value)
         for key, value in context.items()

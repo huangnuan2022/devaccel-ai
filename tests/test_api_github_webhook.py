@@ -2,7 +2,11 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import get_github_webhook_workflow_service
 from app.main import app
-from app.services.exceptions import InvalidWebhookPayloadError, InvalidWebhookSignatureError, TaskDispatchError
+from app.services.exceptions import (
+    InvalidWebhookPayloadError,
+    InvalidWebhookSignatureError,
+    TaskDispatchError,
+)
 
 
 def test_github_webhook_returns_accepted_when_workflow_creates_job() -> None:
