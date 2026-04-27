@@ -67,6 +67,11 @@ State machine blueprints live in:
 - `infra/step-functions/pull-request-analysis.asl.json`
 - `infra/step-functions/flaky-test-triage.asl.json`
 
+The Lambda-side consumer skeleton for the SQS path now lives in:
+
+- `app/lambdas/sqs_step_functions_handler.py`
+- `app/services/sqs_step_functions_consumer.py`
+
 ### Flaky-Test Triage
 
 ```text

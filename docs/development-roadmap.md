@@ -79,6 +79,7 @@ Current note:
 - Step Functions dispatch now has a structured execution input contract (`workflow_name`, `resource_type`, `resource_id`, `trace_context`) and can target workflow-specific state machine ARNs for PR analysis vs. flaky triage.
 - The cloud dispatch path is now split explicitly: `step_functions` starts executions directly, while `sqs_step_functions` sends a start-execution message to SQS for a future Lambda consumer.
 - Initial ASL blueprints exist under `infra/step-functions/` for PR analysis and flaky-test triage.
+- A minimal Lambda consumer skeleton now parses SQS start-execution messages and calls Step Functions `start_execution`.
 
 ## Phase 6: Production Readiness
 

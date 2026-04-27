@@ -51,6 +51,7 @@ app/
   api/          FastAPI routes and dependency wiring
   core/         configuration and logging
   db/           database engine and session management
+  lambdas/      AWS Lambda handler entrypoints
   models/       SQLAlchemy ORM models
   schemas/      request and response models
   services/     domain services, workflows, GitHub adapters
@@ -207,6 +208,18 @@ integration example:
 This keeps [`.github/workflows/ci.yml`](.github/workflows/ci.yml) focused on this repository's own
 lint/test checks, while the forwarder file shows how a user repository can POST failures into
 DevAccel-AI.
+
+For the cloud-oriented `sqs_step_functions` path, the repository now also includes a minimal
+Lambda-side consumer skeleton:
+
+- `app/lambdas/sqs_step_functions_handler.py`
+- `app/services/sqs_step_functions_consumer.py`
+
+That handler is intentionally narrow in scope:
+
+1. read SQS records
+2. validate each record body against `SqsStepFunctionsDispatchMessage`
+3. call Step Functions `start_execution`
 
 The forwarder sends the payload when:
 
