@@ -8,6 +8,10 @@ from app.core.config import get_settings
 from app.core.log_context import bind_log_context
 from app.db.session import get_db
 from app.schemas.flaky_test import FlakyTestTriageRequest, FlakyTestTriageResponse
+from app.schemas.observability import (
+    GitHubCheckRunObservationRequest,
+    ObservabilityCorrelationResponse,
+)
 from app.schemas.pull_request import PullRequestAnalysisResponse, PullRequestAnalyzeRequest
 from app.services.async_dispatch import AsyncWorkflowDispatcher
 from app.services.exceptions import (
@@ -17,6 +21,7 @@ from app.services.exceptions import (
 )
 from app.services.flaky_triage import FlakyTestService
 from app.services.github import GitHubWebhookService
+from app.services.observability import ObservabilityService
 from app.services.pr_analysis import PullRequestService
 from app.services.sqs_step_functions_dispatcher import SqsStepFunctionsDispatcher
 from app.services.step_functions_dispatcher import StepFunctionsDispatcher
@@ -52,6 +57,12 @@ def get_pull_request_service(db: Annotated[Session, Depends(get_db)]) -> PullReq
 
 def get_flaky_test_service(db: Annotated[Session, Depends(get_db)]) -> FlakyTestService:
     return FlakyTestService(db)
+
+
+def get_observability_service(
+    db: Annotated[Session, Depends(get_db)],
+) -> ObservabilityService:
+    return ObservabilityService(db)
 
 
 def get_pull_request_analysis_workflow_service(
@@ -225,3 +236,60 @@ def get_flaky_test_triage(
     if run is None:
         raise HTTPException(status_code=404, detail="Flaky test run not found")
     return FlakyTestTriageResponse.model_validate(run)
+
+
+@router.post(
+    "/observability/github-check-runs",
+    response_model=ObservabilityCorrelationResponse,
+    status_code=202,
+)
+def record_github_check_run_observation(
+    payload: GitHubCheckRunObservationRequest,
+    service: Annotated[ObservabilityService, Depends(get_observability_service)],
+) -> ObservabilityCorrelationResponse:
+    correlation = service.record_github_check_run(payload)
+    return ObservabilityCorrelationResponse.model_validate(correlation)
+
+
+@router.get(
+    "/observability/correlations/{correlation_id}",
+    response_model=ObservabilityCorrelationResponse,
+)
+def get_observability_correlation(
+    correlation_id: str,
+    service: Annotated[ObservabilityService, Depends(get_observability_service)],
+) -> ObservabilityCorrelationResponse:
+    correlation = service.get_by_correlation_id(correlation_id)
+    if correlation is None:
+        raise HTTPException(status_code=404, detail="Observability correlation not found")
+    return ObservabilityCorrelationResponse.model_validate(correlation)
+
+
+@router.get(
+    "/observability/flaky-tests/{flaky_test_id}/correlations",
+    response_model=list[ObservabilityCorrelationResponse],
+)
+def list_flaky_test_observability_correlations(
+    flaky_test_id: int,
+    service: Annotated[ObservabilityService, Depends(get_observability_service)],
+) -> list[ObservabilityCorrelationResponse]:
+    correlations = service.list_for_resource("flaky_test_run", flaky_test_id)
+    return [
+        ObservabilityCorrelationResponse.model_validate(correlation)
+        for correlation in correlations
+    ]
+
+
+@router.get(
+    "/observability/pull-requests/{pull_request_id}/correlations",
+    response_model=list[ObservabilityCorrelationResponse],
+)
+def list_pull_request_observability_correlations(
+    pull_request_id: int,
+    service: Annotated[ObservabilityService, Depends(get_observability_service)],
+) -> list[ObservabilityCorrelationResponse]:
+    correlations = service.list_for_resource("pull_request", pull_request_id)
+    return [
+        ObservabilityCorrelationResponse.model_validate(correlation)
+        for correlation in correlations
+    ]

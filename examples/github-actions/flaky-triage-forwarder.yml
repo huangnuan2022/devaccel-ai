@@ -68,12 +68,16 @@ jobs:
               "suite_name": os.environ["GITHUB_REPOSITORY"],
               "branch_name": os.environ["GITHUB_REF_NAME"],
               "ci_provider": "github_actions",
+              "repo_full_name": os.environ["GITHUB_REPOSITORY"],
               "workflow_name": os.environ["GITHUB_WORKFLOW"],
               "job_name": os.environ["GITHUB_JOB"],
               "run_url": (
                   f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
                   f"{os.environ['GITHUB_RUN_ID']}"
               ),
+              "github_check_run_name": os.environ["GITHUB_JOB"],
+              "github_check_run_status": "completed",
+              "github_check_run_conclusion": "failure",
               "commit_sha": os.environ["GITHUB_SHA"],
               "failure_log": output[-12000:],
           }

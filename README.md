@@ -182,10 +182,18 @@ curl -X POST http://127.0.0.1:8000/api/v1/flaky-tests/triage \
     "suite_name": "payments.integration",
     "branch_name": "main",
     "ci_provider": "github_actions",
+    "repo_full_name": "acme/payments",
     "workflow_name": "CI",
     "job_name": "pytest",
     "run_url": "https://github.com/acme/payments/actions/runs/123",
     "commit_sha": "abc123def456",
+    "github_check_run_id": 123456789,
+    "github_check_run_name": "pytest",
+    "github_check_run_status": "completed",
+    "github_check_run_conclusion": "failure",
+    "github_check_run_url": "https://github.com/acme/payments/runs/123456789",
+    "cloudwatch_log_group": "/aws/ecs/devaccel",
+    "cloudwatch_log_stream": "ecs/api/task-123",
     "failure_log": "TimeoutError: operation exceeded 30 seconds"
   }'
 ```
@@ -246,13 +254,49 @@ Its core behavior is:
       "suite_name": "payments.integration",
       "branch_name": "${{ github.ref_name }}",
       "ci_provider": "github_actions",
+      "repo_full_name": "${{ github.repository }}",
       "workflow_name": "${{ github.workflow }}",
       "job_name": "${{ github.job }}",
       "run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+      "github_check_run_name": "${{ github.job }}",
+      "github_check_run_status": "completed",
+      "github_check_run_conclusion": "failure",
       "commit_sha": "${{ github.sha }}",
       "failure_log": "Trimmed test failure output goes here"
     }
     JSON
+```
+
+### Correlate GitHub check runs and CloudWatch logs
+
+Flaky triage ingestion now writes an `observability_correlations` row that ties together the
+GitHub workflow/check-run metadata, dispatch backend, task id, and CloudWatch log coordinates.
+You can also upsert a check-run observation directly:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/observability/github-check-runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_full_name": "acme/payments",
+    "commit_sha": "abc123def456",
+    "github_check_run_id": 123456789,
+    "github_check_run_name": "pytest",
+    "github_check_run_status": "completed",
+    "github_check_run_conclusion": "failure",
+    "github_check_run_url": "https://github.com/acme/payments/runs/123456789",
+    "github_workflow_name": "CI",
+    "github_job_name": "pytest",
+    "github_run_url": "https://github.com/acme/payments/actions/runs/123",
+    "cloudwatch_log_group": "/aws/ecs/devaccel",
+    "cloudwatch_log_stream": "ecs/api/task-123",
+    "task_id": "task-123"
+  }'
+```
+
+Then query the correlation by id:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/observability/correlations/task:task-123
 ```
 
 ### Simulate a GitHub webhook

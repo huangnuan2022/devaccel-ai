@@ -15,6 +15,7 @@ from app.db.session import get_db
 from app.main import app
 
 TRUNCATE_TABLES = (
+    "observability_correlations",
     "pull_request_analyses",
     "pull_requests",
     "flaky_test_runs",

@@ -11,6 +11,7 @@ from app.services.exceptions import (
     LLMProviderInvocationError,
 )
 from app.services.llm import LLMClient
+from app.services.observability import ObservabilityService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class FlakyTestService:
         self.db.add(run)
         self.db.commit()
         self.db.refresh(run)
+        ObservabilityService(self.db).record_flaky_triage_ingest(run, payload)
         with bind_log_context(flaky_test_id=run.id):
             logger.info(
                 "Created flaky triage job id=%s test_name=%s branch=%s "

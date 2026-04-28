@@ -78,11 +78,25 @@ The Lambda-side consumer skeleton for the SQS path now lives in:
 CI / GitHub Actions / Scheduler
   -> Upload failure logs
   -> FastAPI creates a triage job
+  -> Persist GitHub check-run and CloudWatch correlation metadata
   -> Worker clusters related failures
   -> Retrieve historical patterns
   -> LLM generates likely root causes and fixes
   -> Persist triage results and state
 ```
+
+### Observability Correlation
+
+`observability_correlations` is the query surface for connecting:
+
+- GitHub check-run/workflow identity
+- PR or flaky-test resource ids
+- async dispatch backend and task id
+- CloudWatch log group, stream, and URL
+- request, delivery, and task tracing fields
+
+The table is intentionally PostgreSQL-backed for now so API, worker, and Lambda paths can all write
+the same correlation record before CloudWatch metrics or DynamoDB artifact lookup are added.
 
 ## 3. Storage Responsibilities
 

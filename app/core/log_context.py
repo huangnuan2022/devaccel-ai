@@ -10,6 +10,9 @@ LOG_CONTEXT_FIELDS = (
     "pull_request_id",
     "flaky_test_id",
     "installation_id",
+    "correlation_id",
+    "github_check_run_id",
+    "cloudwatch_log_stream",
 )
 
 _log_context: ContextVar[dict[str, str] | None] = ContextVar("log_context", default=None)

@@ -80,6 +80,7 @@ Current note:
 - The cloud dispatch path is now split explicitly: `step_functions` starts executions directly, while `sqs_step_functions` sends a start-execution message to SQS for a future Lambda consumer.
 - Initial ASL blueprints exist under `infra/step-functions/` for PR analysis and flaky-test triage.
 - A minimal Lambda consumer skeleton now parses SQS start-execution messages and calls Step Functions `start_execution`.
+- Observability correlations now persist GitHub check-run metadata, dispatch backend/task ids, and CloudWatch log coordinates for PR and flaky-test resources.
 
 ## Phase 6: Production Readiness
 

@@ -9,6 +9,7 @@ from app.services.async_dispatch import AsyncWorkflowDispatcher
 from app.services.exceptions import TaskDispatchError
 from app.services.flaky_triage import FlakyTestService
 from app.services.github import GitHubWebhookService
+from app.services.observability import ObservabilityService
 from app.services.pr_analysis import PullRequestService
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,12 @@ class PullRequestAnalysisWorkflowService:
                 raise TaskDispatchError(
                     f"Failed to dispatch pull request analysis for record {record.id}"
                 ) from exc
+            ObservabilityService(self.pr_service.db).record_dispatch(
+                resource_type="pull_request",
+                resource_id=record.id,
+                task_id=dispatch_result.task_id,
+                dispatch_backend=dispatch_result.backend_name,
+            )
             with bind_log_context(task_id=dispatch_result.task_id, pull_request_id=record.id):
                 logger.info(
                     "Dispatched pull request analysis task pull_request_id=%s "
@@ -100,6 +107,12 @@ class FlakyTestWorkflowService:
             raise TaskDispatchError(
                 f"Failed to dispatch flaky test triage for run {run.id}"
             ) from exc
+        ObservabilityService(self.flaky_test_service.db).record_dispatch(
+            resource_type="flaky_test_run",
+            resource_id=run.id,
+            task_id=dispatch_result.task_id,
+            dispatch_backend=dispatch_result.backend_name,
+        )
         with bind_log_context(task_id=dispatch_result.task_id, flaky_test_id=run.id):
             logger.info(
                 "Dispatched flaky triage task flaky_test_id=%s task_id=%s backend=%s",

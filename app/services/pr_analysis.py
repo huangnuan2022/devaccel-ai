@@ -12,6 +12,7 @@ from app.services.exceptions import (
 )
 from app.services.github_pr_content import GitHubPullRequestContentService
 from app.services.llm import LLMClient
+from app.services.observability import ObservabilityService
 
 WEBHOOK_DIFF_PLACEHOLDER = (
     "GitHub webhook payload does not include unified diff text. Fetch from GitHub API."
@@ -51,6 +52,7 @@ class PullRequestService:
         self.db.add(record)
         self.db.commit()
         self.db.refresh(record)
+        ObservabilityService(self.db).record_pull_request_ingest(record)
         with bind_log_context(
             pull_request_id=record.id,
             delivery_id=record.delivery_id,
