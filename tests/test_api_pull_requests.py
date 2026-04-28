@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.routes import get_pull_request_analysis_workflow_service
 from app.main import app
 from app.models.pull_request import PullRequestAnalysis, PullRequestRecord
+from app.services.async_dispatch import AsyncDispatchResult
 from app.services.exceptions import TaskDispatchError
 
 
@@ -19,6 +20,10 @@ def test_create_pull_request_analysis_enqueues_job(client: TestClient, db_sessio
     }
 
     with patch("app.api.routes.TaskDispatcher.dispatch_pull_request_analysis") as dispatch_mock:
+        dispatch_mock.return_value = AsyncDispatchResult(
+            task_id="task-pr-api-123",
+            backend_name="celery",
+        )
         response = client.post("/api/v1/pull-requests/analyze", json=payload)
 
     assert response.status_code == 202

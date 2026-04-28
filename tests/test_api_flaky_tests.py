@@ -7,6 +7,7 @@ from app.api.routes import get_flaky_test_workflow_service
 from app.core.config import get_settings
 from app.main import app
 from app.models.flaky_test import FlakyTestRun
+from app.services.async_dispatch import AsyncDispatchResult
 from app.services.exceptions import TaskDispatchError
 
 
@@ -24,6 +25,10 @@ def test_create_flaky_test_triage_enqueues_job(client: TestClient, db_session: S
     }
 
     with patch("app.api.routes.TaskDispatcher.dispatch_flaky_test_triage") as dispatch_mock:
+        dispatch_mock.return_value = AsyncDispatchResult(
+            task_id="task-flaky-api-123",
+            backend_name="celery",
+        )
         response = client.post("/api/v1/flaky-tests/triage", json=payload)
 
     assert response.status_code == 202
@@ -169,6 +174,10 @@ def test_create_flaky_test_triage_accepts_valid_ingest_token(client: TestClient)
 
     try:
         with patch("app.api.routes.TaskDispatcher.dispatch_flaky_test_triage") as dispatch_mock:
+            dispatch_mock.return_value = AsyncDispatchResult(
+                task_id="task-flaky-token-123",
+                backend_name="celery",
+            )
             response = client.post(
                 "/api/v1/flaky-tests/triage",
                 headers={"Authorization": "Bearer triage-secret"},
