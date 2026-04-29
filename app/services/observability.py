@@ -9,7 +9,13 @@ from app.models.flaky_test import FlakyTestRun
 from app.models.observability import ObservabilityCorrelation
 from app.models.pull_request import PullRequestRecord
 from app.schemas.flaky_test import FlakyTestTriageRequest
-from app.schemas.observability import GitHubCheckRunObservationRequest
+from app.schemas.observability import (
+    CloudWatchLogEventResponse,
+    GitHubCheckRunObservationRequest,
+    ObservabilityCloudWatchEventsResponse,
+)
+from app.services.cloudwatch_logs import CloudWatchLogsService
+from app.services.exceptions import CloudWatchLogsLookupError
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +146,70 @@ class ObservabilityService:
             .all()
         )
 
+    def get_cloudwatch_events(
+        self,
+        *,
+        correlation_id: str,
+        cloudwatch_logs_service: CloudWatchLogsService,
+        limit: int = 50,
+    ) -> ObservabilityCloudWatchEventsResponse | None:
+        correlation = self.get_by_correlation_id(correlation_id)
+        if correlation is None:
+            return None
+
+        log_group_name = (
+            correlation.cloudwatch_log_group or self.settings.cloudwatch_log_group
+        ).strip()
+        if not log_group_name:
+            raise CloudWatchLogsLookupError(
+                f"Correlation {correlation_id} does not include a CloudWatch log group"
+            )
+
+        log_stream_name = (
+            correlation.cloudwatch_log_stream.strip()
+            if correlation.cloudwatch_log_stream
+            else None
+        )
+        filter_pattern = self._build_cloudwatch_filter_pattern(correlation)
+        with bind_log_context(
+            correlation_id=correlation.correlation_id,
+            task_id=correlation.task_id,
+            github_check_run_id=correlation.github_check_run_id,
+            cloudwatch_log_stream=log_stream_name,
+        ):
+            logger.info(
+                "Fetching CloudWatch events correlation_id=%s log_group=%s "
+                "log_stream=%s filter_pattern=%s limit=%s",
+                correlation.correlation_id,
+                log_group_name,
+                log_stream_name or "-",
+                filter_pattern or "-",
+                limit,
+            )
+            events = cloudwatch_logs_service.get_events(
+                log_group_name=log_group_name,
+                log_stream_name=log_stream_name,
+                filter_pattern=filter_pattern,
+                limit=limit,
+            )
+
+        return ObservabilityCloudWatchEventsResponse(
+            correlation_id=correlation.correlation_id,
+            log_group_name=log_group_name,
+            log_stream_name=log_stream_name,
+            filter_pattern=filter_pattern,
+            events=[
+                CloudWatchLogEventResponse(
+                    message=event.message,
+                    timestamp=event.timestamp,
+                    ingestion_time=event.ingestion_time,
+                    event_id=event.event_id,
+                    log_stream_name=event.log_stream_name,
+                )
+                for event in events
+            ],
+        )
+
     def _find_existing(
         self, payload: GitHubCheckRunObservationRequest
     ) -> ObservabilityCorrelation | None:
@@ -241,6 +311,22 @@ class ObservabilityService:
             return payload.repo_full_name
         if payload.ci_provider == "github_actions" and "/" in payload.suite_name:
             return payload.suite_name
+        return None
+
+    @staticmethod
+    def _build_cloudwatch_filter_pattern(
+        correlation: ObservabilityCorrelation,
+    ) -> str | None:
+        candidates = (
+            correlation.task_id,
+            correlation.request_id,
+            correlation.delivery_id,
+            str(correlation.github_check_run_id) if correlation.github_check_run_id else None,
+            correlation.correlation_id,
+        )
+        for candidate in candidates:
+            if candidate and candidate.strip():
+                return f'"{candidate.strip()}"'
         return None
 
     @staticmethod

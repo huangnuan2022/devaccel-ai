@@ -20,3 +20,7 @@ class LLMProviderConfigurationError(Exception):
 
 class LLMProviderInvocationError(Exception):
     pass
+
+
+class CloudWatchLogsLookupError(Exception):
+    pass

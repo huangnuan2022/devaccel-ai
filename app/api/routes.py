@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -10,11 +10,14 @@ from app.db.session import get_db
 from app.schemas.flaky_test import FlakyTestTriageRequest, FlakyTestTriageResponse
 from app.schemas.observability import (
     GitHubCheckRunObservationRequest,
+    ObservabilityCloudWatchEventsResponse,
     ObservabilityCorrelationResponse,
 )
 from app.schemas.pull_request import PullRequestAnalysisResponse, PullRequestAnalyzeRequest
 from app.services.async_dispatch import AsyncWorkflowDispatcher
+from app.services.cloudwatch_logs import CloudWatchLogsService
 from app.services.exceptions import (
+    CloudWatchLogsLookupError,
     InvalidWebhookPayloadError,
     InvalidWebhookSignatureError,
     TaskDispatchError,
@@ -63,6 +66,10 @@ def get_observability_service(
     db: Annotated[Session, Depends(get_db)],
 ) -> ObservabilityService:
     return ObservabilityService(db)
+
+
+def get_cloudwatch_logs_service() -> CloudWatchLogsService:
+    return CloudWatchLogsService()
 
 
 def get_pull_request_analysis_workflow_service(
@@ -263,6 +270,32 @@ def get_observability_correlation(
     if correlation is None:
         raise HTTPException(status_code=404, detail="Observability correlation not found")
     return ObservabilityCorrelationResponse.model_validate(correlation)
+
+
+@router.get(
+    "/observability/correlations/{correlation_id}/cloudwatch-events",
+    response_model=ObservabilityCloudWatchEventsResponse,
+)
+def get_observability_cloudwatch_events(
+    correlation_id: str,
+    service: Annotated[ObservabilityService, Depends(get_observability_service)],
+    cloudwatch_logs_service: Annotated[
+        CloudWatchLogsService,
+        Depends(get_cloudwatch_logs_service),
+    ],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ObservabilityCloudWatchEventsResponse:
+    try:
+        result = service.get_cloudwatch_events(
+            correlation_id=correlation_id,
+            cloudwatch_logs_service=cloudwatch_logs_service,
+            limit=limit,
+        )
+    except CloudWatchLogsLookupError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Observability correlation not found")
+    return result
 
 
 @router.get(

@@ -81,6 +81,7 @@ Current note:
 - Initial ASL blueprints exist under `infra/step-functions/` for PR analysis and flaky-test triage.
 - A minimal Lambda consumer skeleton now parses SQS start-execution messages and calls Step Functions `start_execution`.
 - Observability correlations now persist GitHub check-run metadata, dispatch backend/task ids, and CloudWatch log coordinates for PR and flaky-test resources.
+- CloudWatch log lookup can now fetch events by observability correlation id using stored log group/stream coordinates.
 
 ## Phase 6: Production Readiness
 

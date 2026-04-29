@@ -98,6 +98,10 @@ CI / GitHub Actions / Scheduler
 The table is intentionally PostgreSQL-backed for now so API, worker, and Lambda paths can all write
 the same correlation record before CloudWatch metrics or DynamoDB artifact lookup are added.
 
+The read side can use a correlation id to query CloudWatch Logs. When a log stream is present, the
+adapter reads that stream directly; otherwise it filters the configured log group by the strongest
+trace token available, such as task id, request id, delivery id, check-run id, or correlation id.
+
 ## 3. Storage Responsibilities
 
 - PostgreSQL

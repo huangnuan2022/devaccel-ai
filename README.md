@@ -299,6 +299,13 @@ Then query the correlation by id:
 curl http://127.0.0.1:8000/api/v1/observability/correlations/task:task-123
 ```
 
+If the correlation has a CloudWatch log group and optionally a log stream, fetch the related log
+events:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/observability/correlations/task:task-123/cloudwatch-events?limit=25"
+```
+
 ### Simulate a GitHub webhook
 
 ```bash

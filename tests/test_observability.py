@@ -3,6 +3,7 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.api.routes import get_cloudwatch_logs_service
 from app.core.config import get_settings
 from app.models.observability import ObservabilityCorrelation
 from app.schemas.flaky_test import FlakyTestTriageRequest
@@ -100,3 +101,62 @@ def test_observability_github_check_run_endpoint_records_and_fetches_correlation
     assert fetch_response.status_code == 200
     assert fetch_response.json()["repo_full_name"] == "acme/payments"
     assert fetch_response.json()["github_check_run_conclusion"] == "failure"
+
+
+def test_observability_cloudwatch_events_endpoint_uses_correlation(
+    client: TestClient,
+) -> None:
+    class FakeCloudWatchLogsService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def get_events(self, **kwargs: object) -> list[object]:
+            self.calls.append(kwargs)
+
+            class Event:
+                message = "task-123 failed with TimeoutError"
+                timestamp = 1714200000000
+                ingestion_time = 1714200000100
+                event_id = "event-1"
+                log_stream_name = "ecs/api/task-123"
+
+            return [Event()]
+
+    fake_cloudwatch = FakeCloudWatchLogsService()
+    response = client.post(
+        "/api/v1/observability/github-check-runs",
+        json={
+            "repo_full_name": "acme/payments",
+            "github_check_run_id": 123456789,
+            "cloudwatch_log_group": "/aws/ecs/devaccel",
+            "cloudwatch_log_stream": "ecs/api/task-123",
+            "task_id": "task-123",
+        },
+    )
+    correlation_id = response.json()["correlation_id"]
+
+    from app.main import app
+
+    app.dependency_overrides[get_cloudwatch_logs_service] = lambda: fake_cloudwatch
+    try:
+        events_response = client.get(
+            f"/api/v1/observability/correlations/{correlation_id}/cloudwatch-events"
+        )
+    finally:
+        app.dependency_overrides.pop(get_cloudwatch_logs_service, None)
+
+    assert events_response.status_code == 200
+    body = events_response.json()
+    assert body["correlation_id"] == "task:task-123"
+    assert body["log_group_name"] == "/aws/ecs/devaccel"
+    assert body["log_stream_name"] == "ecs/api/task-123"
+    assert body["filter_pattern"] == '"task-123"'
+    assert body["events"][0]["message"] == "task-123 failed with TimeoutError"
+    assert fake_cloudwatch.calls == [
+        {
+            "log_group_name": "/aws/ecs/devaccel",
+            "log_stream_name": "ecs/api/task-123",
+            "filter_pattern": '"task-123"',
+            "limit": 50,
+        }
+    ]

@@ -65,3 +65,19 @@ class ObservabilityCorrelationResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CloudWatchLogEventResponse(BaseModel):
+    message: str
+    timestamp: int | None = None
+    ingestion_time: int | None = None
+    event_id: str | None = None
+    log_stream_name: str | None = None
+
+
+class ObservabilityCloudWatchEventsResponse(BaseModel):
+    correlation_id: str
+    log_group_name: str
+    log_stream_name: str | None = None
+    filter_pattern: str | None = None
+    events: list[CloudWatchLogEventResponse]
